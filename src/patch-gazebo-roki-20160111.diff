@@ -1,0 +1,3891 @@
+diff -x build -x .git -uprN gazebo.org/cmake/gazebo_config.h.in gazebo/cmake/gazebo_config.h.in
+--- gazebo.org/cmake/gazebo_config.h.in	2015-12-15 14:41:41.848921338 +0900
++++ gazebo/cmake/gazebo_config.h.in	2015-12-16 18:25:43.061234875 +0900
+@@ -22,6 +22,7 @@
+ #cmakedefine HAVE_BULLET 1
+ #cmakedefine HAVE_SIMBODY 1
+ #cmakedefine HAVE_DART 1
++#cmakedefine HAVE_ROKI 1
+ #cmakedefine INCLUDE_RTSHADER 1
+ #cmakedefine HAVE_GTS 1
+ #cmakedefine HAVE_QWT 1
+diff -x build -x .git -uprN gazebo.org/cmake/SearchForStuff.cmake gazebo/cmake/SearchForStuff.cmake
+--- gazebo.org/cmake/SearchForStuff.cmake	2015-12-15 14:41:41.856921338 +0900
++++ gazebo/cmake/SearchForStuff.cmake	2015-12-16 18:26:49.317233621 +0900
+@@ -153,6 +153,17 @@ if (PKG_CONFIG_FOUND)
+   endif()
+ 
+   #################################################
++  # Find Roki
++  if (EXISTS "/usr/local/include/roki/rk_fd.h")
++    message (STATUS "Looking for Roki - found")
++    set (HAVE_ROKI TRUE)
++  else()
++    message (STATUS "Looking for Roki - not found")
++    BUILD_WARNING ("Roki not found, for roki physics engine option, please install roki...http://www.mi.ams.eng.osaka-u.ac.jp/software/roki.html")
++    set (HAVE_ROKI FALSE)
++  endif()
++
++  #################################################
+   # Find tinyxml. Only debian distributions package tinyxml with a pkg-config
+   # Use pkg_check_modules and fallback to manual detection
+   # (needed, at least, for MacOS)
+diff -x build -x .git -uprN gazebo.org/CMakeLists.txt gazebo/CMakeLists.txt
+--- gazebo.org/CMakeLists.txt	2015-12-15 14:41:41.824921338 +0900
++++ gazebo/CMakeLists.txt	2015-12-16 18:28:36.401231594 +0900
+@@ -366,6 +366,9 @@ else (build_errors)
+   )
+ 
+   # "Second level" deps. Depends on a variety of first level deps
++  if (HAVE_ROKI)
++    set(PKG_LIBRARIES ${PKG_LIBRARIES} gazebo_physics_roki)
++  endif()
+   if (HAVE_DART)
+     set(PKG_LIBRARIES ${PKG_LIBRARIES} gazebo_physics_dart)
+   endif()
+diff -x build -x .git -uprN gazebo.org/gazebo/CMakeLists.txt gazebo/gazebo/CMakeLists.txt
+--- gazebo.org/gazebo/CMakeLists.txt	2015-12-15 14:41:42.516921325 +0900
++++ gazebo/gazebo/CMakeLists.txt	2015-12-23 20:39:34.494140697 +0900
+@@ -56,6 +56,9 @@ endif()
+ if(HAVE_DART)
+   add_dependencies(gazebo_physics_dart gazebo_msgs)
+ endif()
++if(HAVE_ROKI)
++  add_dependencies(gazebo_physics_roki gazebo_msgs)
++endif()
+ 
+ 
+ gz_add_executable(gzserver server_main.cc)
+@@ -87,6 +90,10 @@ if (HAVE_BULLET)
+   target_link_libraries(gzserver gazebo_physics_bullet)
+ endif()
+ 
++if (HAVE_ROKI)
++  target_link_libraries(gzserver gazebo_physics_roki)
++endif()
++
+ if (UNIX)
+   target_link_libraries(gzserver pthread)
+ endif()
+diff -x build -x .git -uprN gazebo.org/gazebo/gazebo_main.cc gazebo/gazebo/gazebo_main.cc
+--- gazebo.org/gazebo/gazebo_main.cc	2015-12-15 14:41:42.880921318 +0900
++++ gazebo/gazebo/gazebo_main.cc	2015-12-31 18:03:19.452159828 +0900
+@@ -46,7 +46,7 @@ void help()
+   << "  -h [ --help ]                 Produce this help message.\n"
+   << "  -u [ --pause ]                Start the server in a paused state.\n"
+   << "  -e [ --physics ] arg          Specify a physics engine "
+-  << "(ode|bullet|dart|simbody).\n"
++  << "(ode|bullet|dart|simbody|roki).\n"
+   << "  -p [ --play ] arg             Play a log file.\n"
+   << "  -r [ --record ]               Record state data.\n"
+   << "  --record_encoding arg (=zlib) Compression encoding format for log "
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/CMakeLists.txt gazebo/gazebo/physics/CMakeLists.txt
+--- gazebo.org/gazebo/physics/CMakeLists.txt	2015-12-15 14:41:42.920921317 +0900
++++ gazebo/gazebo/physics/CMakeLists.txt	2015-12-16 18:30:16.885229692 +0900
+@@ -12,6 +12,10 @@ if (HAVE_SIMBODY)
+   add_subdirectory(simbody)
+ endif()
+ 
++if (HAVE_ROKI)
++  add_subdirectory(roki)
++endif()
++
+ if (HAVE_GDAL)
+   include_directories(${GDAL_INCLUDE_DIR})
+ endif()
+@@ -142,6 +146,10 @@ if (HAVE_SIMBODY)
+   target_link_libraries(gazebo_physics gazebo_physics_simbody)
+ endif()
+ 
++if (HAVE_ROKI)
++  target_link_libraries(gazebo_physics gazebo_physics_roki)
++endif()
++
+ if (HAVE_GDAL)
+   target_link_libraries(gazebo_physics ${GDAL_LIBRARY})
+ endif()
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/PhysicsFactory.cc gazebo/gazebo/physics/PhysicsFactory.cc
+--- gazebo.org/gazebo/physics/PhysicsFactory.cc	2015-12-15 14:41:42.952921317 +0900
++++ gazebo/gazebo/physics/PhysicsFactory.cc	2015-12-16 18:57:37.773198632 +0900
+@@ -45,6 +45,11 @@ void RegisterODEPhysics();
+   void RegisterDARTPhysics();
+ #endif
+ 
++#ifdef HAVE_ROKI
++  GZ_PHYSICS_VISIBLE
++  void RegisterRokiPhysics();
++#endif
++
+ using namespace gazebo;
+ using namespace physics;
+ 
+@@ -67,6 +72,10 @@ void PhysicsFactory::RegisterAll()
+ #ifdef HAVE_DART
+   RegisterDARTPhysics();
+ #endif
++
++#ifdef HAVE_ROKI
++  RegisterRokiPhysics();
++#endif
+ }
+ 
+ //////////////////////////////////////////////////
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/CMakeLists.txt gazebo/gazebo/physics/roki/CMakeLists.txt
+--- gazebo.org/gazebo/physics/roki/CMakeLists.txt	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/CMakeLists.txt	2016-01-10 21:51:53.972573833 +0900
+@@ -0,0 +1,71 @@
++include (${gazebo_cmake_dir}/GazeboUtils.cmake)
++
++include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/deps/opende/include)
++
++link_directories(
++  ${CCD_LIBRARY_DIRS}
++  ${Boost_LIBRARY_DIRS}
++)
++
++if (WIN32)
++  add_definitions(-DBUILDING_DLL_GZ_PHYSICS_ROKI)
++endif()
++
++set (sources
++  RokiModel.cc
++  RokiCollision.cc
++  RokiLink.cc
++  RokiPhysics.cc
++  RokiUtils.cc
++  RokiBoxShape.cc
++  RokiSphereShape.cc
++  RokiMeshShape.cc
++  RokiCylinderShape.cc
++  RokiPlaneShape.cc
++  RokiJoint.cc
++  RokiHingeJoint.cc
++  RokiSliderJoint.cc
++  RokiFixedJoint.cc
++  RokiSurfaceParams.cc
++  rk_motor_pseudo.cc
++)
++
++SET (headers
++  RokiModel.cc
++  RokiCollision.hh
++  RokiLink.hh
++  RokiPhysics.hh
++  RokiUtils.hh
++  RokiBoxShape.hh
++  RokiCylinderShape.hh
++  RokiSphereShape.hh
++  RokiMeshShape.hh
++  RokiPlaneShape.hh
++  RokiJoint.hh
++  RokiHingeJoint.hh
++  RokiSliderJoint.hh
++  RokiFixedJoint.hh
++  RokiSurfaceParams.hh
++  rk_motor_pseudo.h
++)
++
++gz_add_library(gazebo_physics_roki ${headers} ${sources})
++target_link_libraries(gazebo_physics_roki
++  gazebo_opcode
++  gazebo_common
++  gazebo_math
++  roki
++  zeo
++  zm
++  cure
++  m
++)
++
++gz_install_library(gazebo_physics_roki)
++gz_install_includes("physics/roki" ${headers})
++
++# unit tests
++set (gtest_sources
++  RokiPhysics_TEST.cc
++)
++gz_build_tests(${gtest_sources})
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/Makefile gazebo/gazebo/physics/roki/Makefile
+--- gazebo.org/gazebo/physics/roki/Makefile	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/Makefile	2015-12-16 19:44:32.853145345 +0900
+@@ -0,0 +1,2 @@
++all:
++	make -C ../../../build/gazebo/physics/roki/
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/rk_motor_pseudo.cc gazebo/gazebo/physics/roki/rk_motor_pseudo.cc
+--- gazebo.org/gazebo/physics/roki/rk_motor_pseudo.cc	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/rk_motor_pseudo.cc	2016-01-10 21:53:39.943956232 +0900
+@@ -0,0 +1,78 @@
++/*
++  rk_motor_pseudo.c
++  see also : https://github.com/s-nakaoka/choreonoid/blob/master/src/RokiPlugin/RokiSimulatorItem.cpp
++*/
++
++#include "rk_motor_pseudo.h"
++#define _rkc(p) ((rkMotorPrpPseudo *)p)
++
++extern "C" {
++
++static void _rkMotorSetInputPseudo(void *prp, double *val);
++static void _rkMotorInertiaPseudo(void *prp, double *val);
++static void _rkMotorInputTrqPseudo(void *prp, double *val);
++static void _rkMotorRegistancePseudo(void *prp, double *dis, double *vel, double *val);
++static void _rkMotorDrivingTrqPseudo(void *prp, double *dis, double *vel, double *acc, double *val);
++static void _rkMotorStateCopyPseudo(void *src, void *dst);
++static bool _rkMotorQueryFReadPseudo(FILE *fp, char *key, void *prp);
++static void _rkMotorFWritePseudo(FILE *fp, void *prp);
++
++void _rkMotorSetInputPseudo(void *prp, double *val){
++  _rkc(prp)->t = *val;
++}
++
++void _rkMotorInertiaPseudo(void */*prp*/, double *val){
++  *val =  0.0;
++}
++
++void _rkMotorInputTrqPseudo(void *prp, double *val){
++  *val = _rkc(prp)->t;
++}
++
++void _rkMotorRegistancePseudo(void */*prp*/, double */*dis*/, double */*vel*/, double *val){
++  *val = 0.0;
++}
++
++void _rkMotorDrivingTrqPseudo(void *prp, double */*dis*/, double */*vel*/, double */*acc*/, double *val){
++  _rkMotorInputTrqPseudo( prp, val);
++}
++
++void _rkMotorStateCopyPseudo(void *src, void *dst){
++  memcpy(dst, src, sizeof(rkMotorPrpPseudo));
++}
++
++bool _rkMotorQueryFReadPseudo(FILE */*fp*/, char */*key*/, void */*prp*/)
++{
++  return true;
++}
++
++void _rkMotorFWritePseudo(FILE */*fp*/, void */*prp*/)
++{
++}
++
++static rkMotorCom rk_motor_pseudo = {
++  1,
++  _rkMotorSetInputPseudo,
++  _rkMotorInertiaPseudo,
++  _rkMotorInputTrqPseudo,
++  _rkMotorRegistancePseudo,
++  _rkMotorDrivingTrqPseudo,
++  _rkMotorStateCopyPseudo,
++  _rkMotorQueryFReadPseudo,
++  _rkMotorFWritePseudo,
++};
++
++void _rkMotorInitPrpPseudo(void *prp)
++{
++  _rkc(prp)->t = 0;
++}
++
++rkMotor *rkMotorCreatePseudo(rkMotor *m)
++{
++  m->prp = zAlloc(rkMotorPrpPseudo, 1);
++  _rkMotorInitPrpPseudo(m->prp);
++  m->com = &rk_motor_pseudo;
++  return m;
++}
++
++}
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/rk_motor_pseudo.h gazebo/gazebo/physics/roki/rk_motor_pseudo.h
+--- gazebo.org/gazebo/physics/roki/rk_motor_pseudo.h	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/rk_motor_pseudo.h	2016-01-10 21:49:54.016449298 +0900
+@@ -0,0 +1,19 @@
++/*
++  rk_motor_pseudo.h
++  see also : https://github.com/s-nakaoka/choreonoid/blob/master/src/RokiPlugin/RokiSimulatorItem.cpp
++*/
++#ifndef __RK_MOTOR_PSEUDO__
++#define __RK_MOTOR_PSEUDO__
++
++#include <roki/rk_motor.h>
++
++extern "C" {
++
++typedef struct {
++  double t;
++} rkMotorPrpPseudo;
++
++rkMotor *rkMotorCreatePseudo(rkMotor *m);
++}
++
++#endif
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiBoxShape.cc gazebo/gazebo/physics/roki/RokiBoxShape.cc
+--- gazebo.org/gazebo/physics/roki/RokiBoxShape.cc	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiBoxShape.cc	2016-01-09 19:30:54.535089063 +0900
+@@ -0,0 +1,50 @@
++#include "gazebo/common/Console.hh"
++#include "gazebo/physics/roki/RokiPhysics.hh"
++#include "gazebo/physics/roki/RokiLink.hh"
++#include "gazebo/physics/roki/RokiCollision.hh"
++#include "gazebo/physics/roki/RokiBoxShape.hh"
++#include "gazebo/physics/roki/RokiUtils.hh"
++#include "gazebo/util/system.hh"
++
++using namespace gazebo;
++using namespace physics;
++
++RokiBoxShape::RokiBoxShape(RokiCollisionPtr _parent)
++  : BoxShape(_parent)
++{
++  DEBUG_PRINT("RokiBoxShape::RokiBoxShape()\n");
++}
++
++//////////////////////////////////////////////////
++RokiBoxShape::~RokiBoxShape()
++{
++  DEBUG_PRINT("RokiBoxShape::~RokiBoxShape()\n");
++}
++
++void RokiBoxShape::SetSize(const math::Vector3 &_size)
++{
++  RokiCollisionPtr collision = boost::dynamic_pointer_cast<RokiCollision>(this->collisionParent);
++  RokiLinkPtr link = boost::dynamic_pointer_cast<RokiLink>(this->collisionParent->GetLink());
++
++  DEBUG_PRINT("RokiBoxShape::SetSize() : link=%s, name=%s, size=(%s)\n", link->GetName().c_str(), GetName().c_str(), conv2str(_size));
++
++  if (_size.x <= 0 || _size.y <= 0 || _size.z <= 0) {
++    gzerr << "Box shape does not support negative size\n";
++    return;
++  }
++
++  BoxShape::SetSize(_size);
++
++  zShape3D *shape = zAlloc(zShape3D, 1);
++  zShape3DInit(shape);
++  zVec3D zp = {{ 0, 0, 0 }};
++  zVec3D ax = {{ 1, 0, 0 }};
++  zVec3D ay = {{ 0, 1, 0 }};
++  zVec3D az = {{ 0, 0, 1 }};
++  zShape3DCreateBox(shape, &zp, &ax, &ay, &az, _size.x, _size.y, _size.z);
++  zBox3DInit(zShape3DBB(shape));
++
++  zNameSet(shape, const_cast<char*>(link->GetPathName().c_str()));
++
++  collision->shape_ = shape;
++}
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiBoxShape.hh gazebo/gazebo/physics/roki/RokiBoxShape.hh
+--- gazebo.org/gazebo/physics/roki/RokiBoxShape.hh	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiBoxShape.hh	2015-12-28 15:52:48.198883263 +0900
+@@ -0,0 +1,22 @@
++#ifndef _ROKIBOXSHAPE_HH_
++#define _ROKIBOXSHAPE_HH_
++
++#include "gazebo/math/Vector3.hh"
++#include "gazebo/physics/BoxShape.hh"
++#include "gazebo/physics/roki/RokiTypes.hh"
++#include "gazebo/physics/roki/RokiLink.hh"
++#include "gazebo/util/system.hh"
++
++namespace gazebo
++{
++  namespace physics
++  {
++    class GZ_PHYSICS_VISIBLE RokiBoxShape : public BoxShape
++    {
++      public: explicit RokiBoxShape(RokiCollisionPtr _parent);
++      public: virtual ~RokiBoxShape();
++      public: virtual void SetSize(const math::Vector3 &_size);
++    };
++  }
++}
++#endif
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiCollision.cc gazebo/gazebo/physics/roki/RokiCollision.cc
+--- gazebo.org/gazebo/physics/roki/RokiCollision.cc	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiCollision.cc	2015-12-28 17:40:10.064445431 +0900
+@@ -0,0 +1,93 @@
++#include <sstream>
++
++#include "gazebo/common/Console.hh"
++#include "gazebo/math/Box.hh"
++
++#include "gazebo/physics/roki/RokiModel.hh"
++#include "gazebo/physics/roki/RokiLink.hh"
++#include "gazebo/physics/roki/RokiCollision.hh"
++#include "gazebo/physics/roki/RokiSurfaceParams.hh"
++#include "gazebo/physics/roki/RokiUtils.hh"
++
++using namespace gazebo;
++using namespace physics;
++
++RokiCollision::RokiCollision(LinkPtr _link) : Collision(_link), shape_(nullptr)
++{
++  DEBUG_PRINT("RokiCollision::RokiCollision()\n");
++  this->SetName("Roki_Collision");
++  this->surface.reset(new RokiSurfaceParams());
++}
++
++RokiCollision::~RokiCollision()
++{
++  DEBUG_PRINT("RokiCollision::~RokiCollision()\n");
++}
++
++void RokiCollision::Load(sdf::ElementPtr _sdf)
++{
++  DEBUG_PRINT("RokiCollision::Load()\n");
++  Collision::Load(_sdf);
++
++  if (this->IsStatic())
++  {
++    this->SetCategoryBits(GZ_FIXED_COLLIDE);
++    this->SetCollideBits(~GZ_FIXED_COLLIDE);
++  }
++}
++
++void RokiCollision::Init()
++{
++  DEBUG_PRINT("RokiCollision::Init() : name=%s\n", GetPathName().c_str());
++  Collision::Init();
++}
++
++void RokiCollision::Fini()
++{
++  DEBUG_PRINT("RokiCollision::Fini() : name=%s\n", GetPathName().c_str());
++  Collision::Fini();
++}
++
++void RokiCollision::OnPoseChange()
++{
++  DEBUG_PRINT("RokiCollision::OnPoseChange() : name=%s\n", GetPathName().c_str());
++}
++
++void RokiCollision::SetCategoryBits(unsigned int _bits)
++{
++  DEBUG_PRINT("RokiCollision::SetCategoryBits() : name=%s bits=%08x\n", GetPathName().c_str(), _bits);
++  gzerr << "Roki does not provide RokiCollision::SetCategoryBits()";
++}
++
++void RokiCollision::SetCollideBits(unsigned int _bits)
++{
++  DEBUG_PRINT("RokiCollision::SetCollideBits() : name=%s bits=%08x\n", GetPathName().c_str(), _bits);
++  gzerr << "Roki does not provide RokiCollision::SetCollideBits()";
++}
++
++unsigned int RokiCollision::GetCategoryBits() const
++{
++  DEBUG_PRINT("RokiCollision::GetCategoryBits() : name=%s\n", GetPathName().c_str());
++  return 0;
++}
++
++unsigned int RokiCollision::GetCollideBits() const
++{
++  DEBUG_PRINT("RokiCollision::GetCollideBits() : name=%s\n", GetPathName().c_str());
++  return 0;
++}
++
++gazebo::math::Box RokiCollision::GetBoundingBox() const
++{
++  DEBUG_PRINT("RokiCollision::GetBoundingBox() : name=%s\n", GetPathName().c_str());
++
++  math::Box result;
++  gzerr << "Roki does not provide bounding box info.\n";
++  return result;
++}
++
++std::string RokiCollision::GetPathName() const
++{ 
++  RokiLinkPtr l = boost::dynamic_pointer_cast<RokiLink>(GetLink());
++  return l->GetPathName();
++}
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiCollision.hh gazebo/gazebo/physics/roki/RokiCollision.hh
+--- gazebo.org/gazebo/physics/roki/RokiCollision.hh	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiCollision.hh	2015-12-28 17:40:59.811059251 +0900
+@@ -0,0 +1,39 @@
++#ifndef _ROKICOLLISION_HH_
++#define _ROKICOLLISION_HH_
++
++#include "gazebo/common/CommonTypes.hh"
++#include "gazebo/physics/PhysicsTypes.hh"
++#include "gazebo/physics/Collision.hh"
++#include "gazebo/util/system.hh"
++#include "gazebo/physics/roki/RokiTypes.hh"
++
++#include "roki/rk_link.h"
++
++namespace gazebo
++{
++  namespace physics
++  {
++    class GZ_PHYSICS_VISIBLE RokiCollision : public Collision
++    {
++      public: explicit RokiCollision(LinkPtr _parent);
++      public: virtual ~RokiCollision();
++      public: virtual void Load(sdf::ElementPtr _sdf);
++      public: virtual void Init();
++      public: virtual void Fini();
++
++      public: virtual void OnPoseChange();
++      public: virtual void SetCategoryBits(unsigned int _bits);
++      public: virtual void SetCollideBits(unsigned int _bits);
++
++      public: virtual unsigned int GetCategoryBits() const;
++      public: virtual unsigned int GetCollideBits() const;
++
++      public: virtual math::Box GetBoundingBox() const;
++
++      public:
++        std::string GetPathName() const;
++        zShape3D* shape_;
++    };
++  }
++}
++#endif
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiCylinderShape.cc gazebo/gazebo/physics/roki/RokiCylinderShape.cc
+--- gazebo.org/gazebo/physics/roki/RokiCylinderShape.cc	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiCylinderShape.cc	2016-01-09 19:30:54.539099463 +0900
+@@ -0,0 +1,56 @@
++#include "gazebo/common/Console.hh"
++#include "gazebo/physics/roki/RokiPhysics.hh"
++#include "gazebo/physics/roki/RokiCollision.hh"
++#include "gazebo/physics/roki/RokiCylinderShape.hh"
++#include "gazebo/physics/roki/RokiUtils.hh"
++#include "gazebo/util/system.hh"
++
++using namespace gazebo;
++using namespace physics;
++
++RokiCylinderShape::RokiCylinderShape(CollisionPtr _parent)
++  : CylinderShape(_parent)
++{
++  DEBUG_PRINT("RokiCylinderShape::RokiCylinderShape()\n");
++}
++
++RokiCylinderShape::~RokiCylinderShape()
++{
++  DEBUG_PRINT("RokiCylinderShape::~RokiCylinderShape()\n");
++}
++
++void RokiCylinderShape::SetSize(double _radius, double _length)
++{
++  RokiCollisionPtr collision = boost::dynamic_pointer_cast<RokiCollision>(this->collisionParent);
++  RokiLinkPtr link = boost::dynamic_pointer_cast<RokiLink>(this->collisionParent->GetLink());
++
++  DEBUG_PRINT("RokiCylinderShape::SetSize() : link=%s, name=%s, radius=%f, length=%f\n", link->GetName().c_str(), GetName().c_str(), _radius, _length);
++
++  if (_radius <= 0)
++  {
++    gzerr << "Cylinder shape does not support negative radius\n";
++    return;
++  }
++
++  if (_length <= 0)
++  {
++    gzerr << "Cylinder shape does not support negative length\n";
++    return;
++  }
++
++  CylinderShape::SetSize(_radius, _length);
++
++  zShape3D* shape = zAlloc(zShape3D, 1);
++
++  zVec3D c1 = {{0, 0, _length *  0.5}};
++  zVec3D c2 = {{0, 0, _length * -0.5}};
++
++  zShape3DCreateCyl(shape, &c1, &c2, _radius, 8);
++  zBox3DInit(zShape3DBB(shape));
++
++  zNameSet(shape, const_cast<char*>(link->GetPathName().c_str()));
++
++  collision->shape_ = shape;
++}
++
++
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiCylinderShape.hh gazebo/gazebo/physics/roki/RokiCylinderShape.hh
+--- gazebo.org/gazebo/physics/roki/RokiCylinderShape.hh	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiCylinderShape.hh	2015-12-28 15:53:15.032469460 +0900
+@@ -0,0 +1,22 @@
++#ifndef _ROKICYLINDERSHAPE_HH_
++#define _ROKICYLINDERSHAPE_HH_
++
++#include "gazebo/physics/CylinderShape.hh"
++#include "gazebo/physics/roki/RokiPhysics.hh"
++#include "gazebo/physics/roki/RokiTypes.hh"
++#include "gazebo/physics/roki/RokiLink.hh"
++#include "gazebo/util/system.hh"
++
++namespace gazebo
++{
++  namespace physics
++  {
++    class GZ_PHYSICS_VISIBLE RokiCylinderShape : public CylinderShape
++    {
++      public: explicit RokiCylinderShape(CollisionPtr _parent);
++      public: virtual ~RokiCylinderShape();
++      public: void SetSize(double _radius, double _length);
++    };
++  }
++}
++#endif
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiFixedJoint.cc gazebo/gazebo/physics/roki/RokiFixedJoint.cc
+--- gazebo.org/gazebo/physics/roki/RokiFixedJoint.cc	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiFixedJoint.cc	2016-01-07 20:05:25.113272547 +0900
+@@ -0,0 +1,90 @@
++#include "gazebo/gazebo_config.h"
++#include "gazebo/common/Console.hh"
++#include "gazebo/physics/Link.hh"
++
++#include "gazebo/physics/roki/RokiTypes.hh"
++#include "gazebo/physics/roki/RokiUtils.hh"
++#include "gazebo/physics/roki/RokiLink.hh"
++#include "gazebo/physics/roki/RokiJoint.hh"
++#include "gazebo/physics/roki/RokiFixedJoint.hh"
++
++using namespace gazebo;
++using namespace physics;
++
++RokiFixedJoint::RokiFixedJoint(BasePtr _parent)
++  : FixedJoint<RokiJoint>(_parent)
++{
++  DEBUG_PRINT("RokiFixedJoint::RokiFixedJoint() : joint_name=%s\n", GetName().c_str());
++}
++
++RokiFixedJoint::~RokiFixedJoint()
++{
++  DEBUG_PRINT("RokiFixedJoint::~RokiFixedJoint() : joint_name=%s\n", GetName().c_str());
++}
++
++void RokiFixedJoint::Load(sdf::ElementPtr _sdf)
++{
++  DEBUG_PRINT("RokiFixedJoint::Load() : joint_name=%s\n", GetName().c_str());
++  FixedJoint<RokiJoint>::Load(_sdf);
++}
++
++void RokiFixedJoint::Init()
++{
++  DEBUG_PRINT("RokiFixedJoint::Init() enter : joint_name=%s\n", GetName().c_str());
++  DEBUG_PRINT("RokiFixedJoint::Init() call FixedJoint<RokiJoint>::Init() : joint_name=%s\n", GetName().c_str());
++  FixedJoint<RokiJoint>::Init();
++  DEBUG_PRINT("RokiFixedJoint::Init() return FixedJoint<RokiJoint>::Init() : joint_name=%s\n", GetName().c_str());
++
++  RokiLinkPtr link_parent = GetParentRokiLink();
++  RokiLinkPtr link_child  = GetChildRokiLink();
++
++  rkJoint* child_anchor_joint = link_child->rkjoint_anchor_;
++  
++  DEBUG_PRINT("RokiFixedJoint::init() : joint_name=%s\n", GetName().c_str());
++
++  rkJointCreate(child_anchor_joint, RK_JOINT_FIXED);
++
++  if (!link_parent) {
++    // world -> root joint
++    DEBUG_PRINT("RokiFixedJoint::Init() : joint_name=%s (world->root)\n", GetName().c_str());
++    DEBUG_PRINT("RokiFixedJoint::Init() leave : joint_name=%s\n", GetName().c_str());
++    return;
++  }
++
++  rkLink* parent_org_frame   = link_parent->rklink_org_;
++  rkLink* child_anchor_frame = link_child->rklink_anchor_;
++  rkLinkAddChild(parent_org_frame, child_anchor_frame);
++
++  DEBUG_PRINT("RokiFixedJoint::Init() : rkLinkAddChild() parent=%s, child=%s\n", link_parent->GetName().c_str(), link_child->GetName().c_str());
++
++  DEBUG_PRINT("RokiFixedJoint::Init() leave : joint_name=%s\n", GetName().c_str());
++}
++
++math::Angle RokiFixedJoint::GetAngleImpl(unsigned int _index) const
++{
++  DEBUG_PRINT("RokiFixedJoint::GetAngleImpl() : joint_name=%s, _index=%d\n", GetName().c_str(), _index);
++  return math::Angle();
++}
++
++void RokiFixedJoint::SetVelocity(unsigned int _index, double _vel)
++{
++  DEBUG_PRINT("RokiFixedJoint::SetVelocity() : joint_name=%s, _index=%d, _vt=%f\n", GetName().c_str(), _index, _vel);
++}
++
++double RokiFixedJoint::GetVelocity(unsigned int _index) const
++{
++  DEBUG_PRINT("RokiFixedJoint::GetVelocity() : joint_name=%s, _index=%d\n", GetName().c_str(), _index);
++  return 0.0;
++}
++
++void RokiFixedJoint::SetForceImpl(unsigned int _index, double _effort)
++{
++  DEBUG_PRINT("RokiFixedJoint::SetForceImpl() : joint_name=%s, _index=%d, _effort=%f\n", GetName().c_str(), _index, _effort);
++}
++
++double RokiFixedJoint::GetForceImpl(unsigned int _index)
++{
++  double f = 0;
++  DEBUG_PRINT("RokiFixedJoint::GetForceImpl() : joint_name=%s, _index=%d, force=%f\n", GetName().c_str(), _index, f);
++  return f;
++}
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiFixedJoint.hh gazebo/gazebo/physics/roki/RokiFixedJoint.hh
+--- gazebo.org/gazebo/physics/roki/RokiFixedJoint.hh	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiFixedJoint.hh	2016-01-02 14:58:27.082220970 +0900
+@@ -0,0 +1,30 @@
++#ifndef _ROKIFIXEDJOINT_HH_
++#define _ROKIFIXEDJOINT_HH_
++
++#include "gazebo/math/Angle.hh"
++#include "gazebo/math/Vector3.hh"
++
++#include "gazebo/util/system.hh"
++
++#include "gazebo/physics/FixedJoint.hh"
++#include "gazebo/physics/roki/RokiJoint.hh"
++
++namespace gazebo
++{
++  namespace physics
++  {
++    class GZ_PHYSICS_VISIBLE RokiFixedJoint : public FixedJoint<RokiJoint>
++    {
++      public: RokiFixedJoint(BasePtr _parent);
++      public: virtual ~RokiFixedJoint();
++      public: virtual void Load(sdf::ElementPtr _sdf);
++      public: virtual void Init();
++      public: virtual math::Angle GetAngleImpl(unsigned int _index) const;
++      public: virtual void SetVelocity(unsigned int _index, double _vel);
++      public: virtual double GetVelocity(unsigned int _index) const;
++      protected: virtual void SetForceImpl(unsigned int _index, double _effort);
++      protected: virtual double GetForceImpl(unsigned int _index);
++    };
++  }
++}
++#endif
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiHingeJoint.cc gazebo/gazebo/physics/roki/RokiHingeJoint.cc
+--- gazebo.org/gazebo/physics/roki/RokiHingeJoint.cc	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiHingeJoint.cc	2016-01-10 22:07:20.970934732 +0900
+@@ -0,0 +1,161 @@
++#include "gazebo/gazebo_config.h"
++#include "gazebo/common/Console.hh"
++#include "gazebo/physics/Link.hh"
++
++#include "gazebo/physics/roki/RokiTypes.hh"
++#include "gazebo/physics/roki/RokiUtils.hh"
++#include "gazebo/physics/roki/RokiLink.hh"
++#include "gazebo/physics/roki/RokiJoint.hh"
++#include "gazebo/physics/roki/RokiHingeJoint.hh"
++
++#include "rk_motor_pseudo.h"
++
++using namespace gazebo;
++using namespace physics;
++
++
++RokiHingeJoint::RokiHingeJoint(BasePtr _parent)
++  : HingeJoint<RokiJoint>(_parent), prp_(nullptr)
++{
++  DEBUG_PRINT("RokiHingeJoint::RokiHingeJoint() : joint_name=%s\n", GetName().c_str());
++}
++
++RokiHingeJoint::~RokiHingeJoint()
++{
++  DEBUG_PRINT("RokiHingeJoint::~RokiHingeJoint() : joint_name=%s\n", GetName().c_str());
++}
++
++void RokiHingeJoint::Load(sdf::ElementPtr _sdf)
++{
++  DEBUG_PRINT("RokiHingeJoint::Load() : joint_name=%s\n", GetName().c_str());
++  HingeJoint<RokiJoint>::Load(_sdf);
++}
++
++void RokiHingeJoint::Init()
++{
++  DEBUG_PRINT("RokiHingeJoint::Init() enter : joint_name=%s\n", GetName().c_str());
++
++  HingeJoint<RokiJoint>::Init();
++
++  // create rkJoint
++  rkjoint_ = GetChildRokiLink()->rkjoint_anchor_;
++  rkJointCreate(rkjoint_, RK_JOINT_REVOL);
++
++  // roki/rk_joint_revol.h : 
++  //  typedef struct{
++  //    /* joint displacement, velocity, acceleration and torque */
++  //    double dis, vel, acc, trq;
++  //    double min, max; /* limiter */
++  //    /* joint stiffness, viscosity and coulomb friction */
++  //    double stiff, viscos, coulomb;
++  //    /* friction */
++  //    double tf;
++  //    /* static friction */
++  //    double sf;
++  //    /* trigonometric values */
++  //    double _s, _c;
++
++  //    /* motor */
++  //    rkMotor m;
++
++  //    /* for forward dynamics */
++  //    rkJointRef _ref;
++  //  } rkJointPrpRevol;
++  
++  // set joint parameters
++  prp_ = (rkJointPrpRevol*)rkjoint_->prp;
++  prp_->min = lowStop_[0].Radian();
++  prp_->max = highStop_[0].Radian();
++  prp_->tf  = friction_[0];
++  prp_->sf  = friction_[0];
++  
++  DEBUG_PRINT("RokiHingeJoint::Init() enter : joint_name=%s, friction=%f\n", GetName().c_str(), friction_[0]);
++
++  // create rkMotor
++  rkJointGetMotor(rkjoint_, &rkmotor_);
++  rkMotorInit(rkmotor_);
++  rkMotorCreatePseudo(rkmotor_);
++  
++  // connect rkLinks
++  RokiLinkPtr link_parent = GetParentRokiLink();
++  RokiLinkPtr link_child  = GetChildRokiLink();
++
++  if (link_parent) {
++    rkLink* parent_org_frame   = link_parent->rklink_org_;
++    rkLink* child_anchor_frame = link_child->rklink_anchor_;
++    rkLinkAddChild(parent_org_frame, child_anchor_frame);
++  }
++
++  //
++  // create org2anchor offset pose
++  //
++
++  // position
++  math::Vector3 pos_org_wld = link_child->GetWorldPose().pos;
++  org2anchor_pose_.pos = anchor_pos_ - pos_org_wld;
++  DEBUG_PRINT("RokiHingeJoint::Init() : name=%s, pos_org_wld=%s, anchor_pos_=%s, org2anchor_pose_.pos=%s\n", GetName().c_str(), conv2str(pos_org_wld), conv2str(anchor_pos_), conv2str(org2anchor_pose_.pos));
++
++  // rotate Z axis -> anchor_axis_ 
++  math::Vector3 axis_z(0, 0, 1);
++  math::Vector3 axis_rot = axis_z.Cross(anchor_axis_);
++  double th = acos(axis_z.Dot(anchor_axis_)/(axis_z.GetLength() * anchor_axis_.GetLength()));
++
++  org2anchor_pose_.rot.SetFromAxis(axis_rot.Normalize(), th);
++
++  DEBUG_PRINT("RokiHingeJoint::Init() : name=%s, joint_axis_=%s, axis_rot=%s, org2anchor_pose_.rot=%s\n", GetName().c_str(), conv2str(anchor_axis_), conv2str(axis_rot), conv2str(org2anchor_pose_.rot));
++
++  DEBUG_PRINT("RokiHingeJoint::Init() leave : joint_name=%s\n", GetName().c_str());
++}
++
++math::Angle RokiHingeJoint::GetAngleImpl(unsigned int _index) const
++{
++  DEBUG_PRINT("RokiHingeJoint::GetAngleImpl() : joint_name=%s, _index=%d\n", GetName().c_str(), _index);
++
++  double dis;
++  rkJointGetDis(rkjoint_, &dis);
++  math::Angle angle;
++  angle.SetFromRadian(dis);
++
++  return angle;
++}
++
++void RokiHingeJoint::SetVelocity(unsigned int _index, double _vel)
++{
++  DEBUG_PRINT("RokiHingeJoint::SetVelocity() : joint_name=%s, _index=%d, _vt=%f\n", GetName().c_str(), _index, _vel);
++  double v = 0;
++  rkJointSetVel(rkjoint_, &v);
++}
++
++double RokiHingeJoint::GetVelocity(unsigned int _index) const
++{
++  DEBUG_PRINT("RokiHingeJoint::GetVelocity() : joint_name=%s, _index=%d\n", GetName().c_str(), _index);
++  double v = 0;
++  rkJointGetVel(rkjoint_, &v);
++  return v;
++}
++
++void RokiHingeJoint::SetForceImpl(unsigned int _index, double _effort)
++{
++  DEBUG_PRINT("RokiHingeJoint::SetForceImpl() : joint_name=%s, _index=%d, _effort=%f\n", GetName().c_str(), _index, _effort);
++  double e = _effort;
++  rkJointMotorSetInput(rkjoint_, &e);
++}
++
++double RokiHingeJoint::GetForceImpl(unsigned int _index)
++{
++  double f = 0;
++  rkJointMotorDrivingTrq(rkjoint_, &f);
++  DEBUG_PRINT("RokiHingeJoint::GetForceImpl() : joint_name=%s, _index=%d, force=%f\n", GetName().c_str(), _index, f);
++  return f;
++}
++
++void RokiHingeJoint::SetFriction(const unsigned int _index, const double value)
++{
++  RokiJoint::SetFriction(_index, value);
++
++  if (_index > 0) return;
++  if (rkmotor_ == nullptr) return;
++
++  prp_->tf  = value;
++  prp_->sf  = value;
++}
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiHingeJoint.hh gazebo/gazebo/physics/roki/RokiHingeJoint.hh
+--- gazebo.org/gazebo/physics/roki/RokiHingeJoint.hh	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiHingeJoint.hh	2016-01-04 15:04:03.535158423 +0900
+@@ -0,0 +1,36 @@
++#ifndef _ROKIHINGEJOINT_HH_
++#define _ROKIHINGEJOINT_HH_
++
++#include "gazebo/math/Angle.hh"
++#include "gazebo/math/Vector3.hh"
++
++#include "gazebo/util/system.hh"
++
++#include "gazebo/physics/HingeJoint.hh"
++#include "gazebo/physics/roki/RokiJoint.hh"
++
++namespace gazebo
++{
++  namespace physics
++  {
++    class GZ_PHYSICS_VISIBLE RokiHingeJoint : public HingeJoint<RokiJoint>
++    {
++      public: RokiHingeJoint(BasePtr _parent);
++      public: virtual ~RokiHingeJoint();
++      public: virtual void Load(sdf::ElementPtr _sdf);
++      public: virtual void Init();
++      public: virtual math::Angle GetAngleImpl(unsigned int _index) const;
++      public: virtual void SetVelocity(unsigned int _index, double _vel);
++      public: virtual double GetVelocity(unsigned int _index) const;
++      protected: virtual void SetForceImpl(unsigned int _index, double _effort);
++      protected: virtual double GetForceImpl(unsigned int _index);
++
++      public:
++        virtual void SetFriction(const unsigned int _index, const double value);
++
++      public:
++        rkJointPrpRevol *prp_;
++    };
++  }
++}
++#endif
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiJoint.cc gazebo/gazebo/physics/roki/RokiJoint.cc
+--- gazebo.org/gazebo/physics/roki/RokiJoint.cc	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiJoint.cc	2016-01-10 22:04:48.105280419 +0900
+@@ -0,0 +1,320 @@
++#include "gazebo/common/Assert.hh"
++#include "gazebo/common/Console.hh"
++#include "gazebo/common/Exception.hh"
++
++#include "gazebo/physics/PhysicsTypes.hh"
++#include "gazebo/physics/World.hh"
++#include "gazebo/physics/Link.hh"
++#include "gazebo/physics/PhysicsEngine.hh"
++
++#include "gazebo/physics/roki/RokiModel.hh"
++#include "gazebo/physics/roki/RokiLink.hh"
++#include "gazebo/physics/roki/RokiJoint.hh"
++#include "gazebo/physics/roki/RokiUtils.hh"
++
++using namespace gazebo;
++using namespace physics;
++
++RokiJoint::RokiJoint(BasePtr _parent)
++  : Joint(_parent), rkjoint_(nullptr), rkmotor_(nullptr)
++{
++  DEBUG_PRINT("RokiJoint::RokiJoint()\n");
++}
++
++RokiJoint::~RokiJoint()
++{
++  DEBUG_PRINT("RokiJoint::~RokiJoint()\n");
++  this->Detach();
++  if (rkmotor_) {
++    rkMotorDestroy(rkmotor_);
++    rkmotor_ = nullptr;
++  }
++}
++
++void RokiJoint::Load(sdf::ElementPtr _sdf)
++{
++  DEBUG_PRINT("RokiJoint::Load()\n");
++  Joint::Load(_sdf);
++}
++
++void RokiJoint::Init()
++{
++  DEBUG_PRINT("RokiJoint::Init() enter : joint_name=%s\n", GetName().c_str());
++
++  Joint::Init();
++
++  DEBUG_PRINT("RokiJoint::Init() leave : joint_name=%s\n", GetName().c_str());
++}
++
++void RokiJoint::Reset()
++{
++  DEBUG_PRINT("RokiJoint::Reset() : joint_name=%s\n", GetName().c_str());
++  Joint::Reset();
++}
++
++LinkPtr RokiJoint::GetJointLink(unsigned int _index) const
++{
++  DEBUG_PRINT("RokiJoint::GetJointLink() : joint_name=%s, _index~%d\n", GetName().c_str(), _index);
++
++  LinkPtr result;
++  return result;
++}
++
++bool RokiJoint::AreConnected(LinkPtr _one, LinkPtr _two) const
++{
++  DEBUG_PRINT("RokiJoint::AreConnected() : joint_name=%s\n", GetName().c_str());
++
++  if (_one.get() == NULL && _two.get() == NULL) return false;
++
++  if ((this->childLink.get() == _one.get() && this->parentLink.get() == _two.get())
++      || (this->childLink.get() == _two.get() && this->parentLink.get() == _one.get())) {
++    return true;
++  }
++  return false;
++}
++
++void RokiJoint::Attach(LinkPtr _parent, LinkPtr _child)
++{
++  DEBUG_PRINT("RokiJoint::Attach() : joint_name=%s\n", GetName().c_str());
++
++  Joint::Attach(_parent, _child);
++  if (this->AreConnected(_parent, _child)) return;
++}
++
++void RokiJoint::Detach()
++{
++  DEBUG_PRINT("RokiJoint::Detach() : joint_name=%s\n", GetName().c_str());
++
++  if (!this->AreConnected(this->parentLink, this->childLink)) return;
++
++  this->childLink.reset();
++  this->parentLink.reset();
++  gzerr << "Roki does not support joint dettaching.\n";
++
++  Joint::Detach();
++}
++
++math::Vector3 RokiJoint::GetAnchor(unsigned int _index) const
++{
++  DEBUG_PRINT("RokiFixedJoint::GetAnchor() : joint_name=%s, _index=%d, anchor_pos_=%s\n", GetName().c_str(), _index, conv2str(anchor_pos_));
++  return anchor_pos_;
++}
++
++void RokiJoint::SetAnchor(unsigned int _index, const gazebo::math::Vector3 & _anchor)
++{
++  DEBUG_PRINT("RokiJoint::SetAnchor() : joint_name=%s, _index=%d, _anchor=%s\n", GetName().c_str(), _index, conv2str(_anchor));
++  anchor_pos_ = _anchor;
++}
++
++math::Vector3 RokiJoint::GetAxis(unsigned int _index) const
++{
++  DEBUG_PRINT("RokiFixedJoint::GetAxis() : joint_name=%s, _index=%d, anchor_axis_=%s\n", GetName().c_str(), _index, conv2str(anchor_axis_));
++  return anchor_axis_;
++}
++
++math::Vector3 RokiJoint::GetGlobalAxis(unsigned int _index) const
++{
++  DEBUG_PRINT("RokiFixedJoint::GetGlobalAxis() : joint_name=%s, _index=%d, anchor_axis_=%s\n", GetName().c_str(), _index, conv2str(anchor_axis_));
++  return anchor_axis_;
++}
++
++void RokiJoint::SetAxis(unsigned int _index, const math::Vector3& _axis)
++{
++  DEBUG_PRINT("RokiJoint::SetAxis() : joint_name=%s, _index=%d, _axis=%s\n", GetName().c_str(), _index, conv2str(_axis));
++  anchor_axis_ = _axis;
++}
++
++bool RokiJoint::SetHighStop(unsigned int _index, const math::Angle &_angle)
++{
++  highStop_[_index] = _angle;
++  return true;
++}
++
++bool RokiJoint::SetLowStop(unsigned int _index, const math::Angle &_angle)
++{
++  lowStop_[_index] = _angle;
++  return true;
++}
++
++math::Angle RokiJoint::GetHighStop(unsigned int _index)
++{
++  return highStop_[_index];
++}
++
++math::Angle RokiJoint::GetLowStop(unsigned int _index)
++{
++  return lowStop_[_index];
++}
++
++void RokiJoint::SetDamping(unsigned int _index, double _damping)
++{
++  DEBUG_PRINT("RokiJoint::SetDamping() : joint_name=%s, _index=%d, _damping=%f\n", GetName().c_str(), _index, _damping);
++  if (_index < GetAngleCount()) {
++    this->SetStiffnessDamping(_index, this->stiffnessCoefficient[_index], _damping);
++  }
++}
++
++void RokiJoint::SetStiffness(unsigned int _index, const double _stiffness)
++{
++  DEBUG_PRINT("RokiJoint::SetStiffness() : joint_name=%s, _index=%d, _stiffness=%f\n", GetName().c_str(), _index, _stiffness);
++  if (_index < GetAngleCount()) {
++    this->SetStiffnessDamping(_index, _stiffness, this->dissipationCoefficient[_index]);
++  }
++}
++
++void RokiJoint::SetStiffnessDamping(unsigned int _index, double _stiffness, double _damping, double _reference)
++{
++  DEBUG_PRINT("RokiJoint::SetStiffness() : joint_name=%s, _index=%d, _stiffness=%f\n", GetName().c_str(), _index, _stiffness);
++  if (_index < this->GetAngleCount()) {
++    this->stiffnessCoefficient[_index]    = _stiffness;
++    this->dissipationCoefficient[_index]  = _damping;
++    this->springReferencePosition[_index] = _reference;
++  }
++}
++
++void RokiJoint::SetMaxForce(unsigned int _index, double _force)
++{
++  DEBUG_PRINT("RokiJoint::SetMaxForce() : joint_name=%s, _index=%d, _force=%f\n", GetName().c_str(), _index, _force);
++}
++
++double RokiJoint::GetMaxForce(unsigned int _index)
++{
++  DEBUG_PRINT("RokiJoint::GetMaxForce() : joint_name=%s, _index=%d\n", GetName().c_str(), _index);
++  return 0.0;
++}
++
++math::Vector3 RokiJoint::GetLinkForce(unsigned int _index) const
++{
++  DEBUG_PRINT("RokiJoint::GetLinkForce() : joint_name=%s, _index=%d\n", GetName().c_str(), _index);
++
++  math::Vector3 result;
++  return result;
++}
++
++math::Vector3 RokiJoint::GetLinkTorque(unsigned int _index) const
++{
++  DEBUG_PRINT("RokiJoint::GetLinkTorque() : joint_name=%s, _index=%d\n", GetName().c_str(), _index);
++
++  math::Vector3 result;
++  return result;
++}
++
++bool RokiJoint::SetParam(const std::string &_key, unsigned int _index, const boost::any &_value)
++{
++  DEBUG_PRINT("RokiJoint::SetParam() : joint_name=%s, _key=%s, _index=%d, _value=%s\n", GetName().c_str(), _key.c_str(), _index, any2str(_value));
++
++  std::stringstream key;
++  key << _key << ":" << _index;
++  params_[_key] = _value;
++
++  try {
++    if (_key == "hi_stop") {
++      this->SetHighStop(_index, boost::any_cast<double>(_value));
++    }
++    else if (_key == "lo_stop") {
++      this->SetLowStop(_index, boost::any_cast<double>(_value));
++    }
++    else if (_key == "friction") {
++      this->SetFriction(_index, boost::any_cast<double>(_value));
++    }
++    else {
++      gzerr << "Unable to handle joint attribute[" << _key << "]\n";
++      return false;
++    }
++  }
++  catch(const boost::bad_any_cast &e) {
++    gzerr << "SetParam(" << _key << ")" << " boost any_cast error:" << e.what() << std::endl;
++    return false;
++  }
++
++  return true;
++}
++
++double RokiJoint::GetParam(const std::string &_key, unsigned int _index)
++{
++  DEBUG_PRINT("RokiJoint::GetParam() : joint_name=%s, _key=%s, _index=%d\n", GetName().c_str(), _key.c_str(), _index);
++
++  std::stringstream key;
++  key << _key << ":" << _index;
++
++  if (params_.find(key.str()) != params_.end()) {
++    return boost::any_cast<double>(params_[key.str()]);
++  }
++
++  return Joint::GetParam(_key, _index);
++}
++
++JointWrench RokiJoint::GetForceTorque(unsigned int _index)
++{
++  DEBUG_PRINT("RokiJoint::GetForceTorque() : joint_name=%s, _index=%d\n", GetName().c_str(), _index);
++
++  JointWrench jointWrench;
++  return jointWrench;
++}
++
++void RokiJoint::SetForce(unsigned int _index, double _force)
++{
++  DEBUG_PRINT("RokiJoint::SetForce() : joint_name=%s, _index=%d, _force=%f\n", GetName().c_str(), _index, _force);
++
++  this->SetForceImpl(_index, _force);
++
++  if (this->childLink) this->childLink->SetEnabled(true);
++  if (this->parentLink) this->parentLink->SetEnabled(true);
++}
++
++double RokiJoint::GetForce(unsigned int _index)
++{
++  DEBUG_PRINT("RokiJoint::GetForce() : joint_name=%s, _index=%d\n", GetName().c_str(), _index);
++
++  if (this->GetAngleCount() <= _index) {
++    gzerr << "Invalid joint index [" << _index << "] when trying to get force\n";
++    return 0;
++  }
++  return this->GetForceImpl(_index);
++}
++
++unsigned int RokiJoint::GetAngleCount() const
++{
++  DEBUG_PRINT("RokiJoint::GetAngleCount() : joint_name=%s\n", GetName().c_str());
++  unsigned int angleCount = 0;
++  return angleCount;
++}
++
++void RokiJoint::ApplyDamping()
++{
++  DEBUG_PRINT("RokiJoint::GetAngleCount() : joint_name=%s\n", GetName().c_str());
++}
++
++RokiModelPtr RokiJoint::GetRokiModel() const
++{
++  RokiLinkPtr link = GetParentRokiLink();
++  return boost::dynamic_pointer_cast<RokiModel>(link->GetModel());
++}
++
++rkFDCell* RokiJoint::GetRkFDCell() const
++{
++  return GetRokiModel()->cell_;
++}
++
++rkChain* RokiJoint::GetRkChain() const
++{
++  return GetRokiModel()->chain_;
++}
++
++RokiLinkPtr RokiJoint::GetParentRokiLink() const
++{
++  LinkPtr link = GetParent();
++  return boost::dynamic_pointer_cast<RokiLink>(link);
++}
++
++RokiLinkPtr RokiJoint::GetChildRokiLink() const
++{
++  LinkPtr link = GetChild();
++  return boost::dynamic_pointer_cast<RokiLink>(link);
++}
++
++void RokiJoint::SetFriction(const unsigned int _index, const double value)
++{
++  if (_index >= MAX_JOINT_AXIS) return;
++  friction_[_index] = value;
++}
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiJoint.hh gazebo/gazebo/physics/roki/RokiJoint.hh
+--- gazebo.org/gazebo/physics/roki/RokiJoint.hh	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiJoint.hh	2016-01-10 22:04:48.109291219 +0900
+@@ -0,0 +1,85 @@
++#ifndef _ROKIJOINT_HH_
++#define _ROKIJOINT_HH_
++
++#include <boost/any.hpp>
++#include <string>
++
++#include "gazebo/common/Exception.hh"
++#include "gazebo/physics/Joint.hh"
++#include "gazebo/util/system.hh"
++
++#include "gazebo/physics/roki/RokiTypes.hh"
++
++#include <map>
++
++#include "roki/rk_fd.h"
++#include "roki/rk_link.h"
++#include "roki/rk_joint.h"
++
++namespace gazebo
++{
++  namespace physics
++  {
++    class GZ_PHYSICS_VISIBLE RokiJoint : public Joint
++    {
++      public: RokiJoint(BasePtr _parent);
++      public: virtual ~RokiJoint();
++      public: virtual void Load(sdf::ElementPtr _sdf);
++      public: virtual void Init();
++      public: virtual void Reset();
++      public: virtual LinkPtr GetJointLink(unsigned int _index) const;
++      public: virtual bool AreConnected(LinkPtr _one, LinkPtr _two) const;
++      public: virtual void Attach(LinkPtr _parent, LinkPtr _child);
++      public: virtual void Detach();
++      public: virtual math::Vector3 GetAnchor(unsigned int _index) const;
++      public: virtual void SetAnchor(unsigned int _index, const gazebo::math::Vector3 & _anchor);
++      public: virtual math::Vector3 GetAxis(unsigned int _index) const;
++      public: virtual math::Vector3 GetGlobalAxis(unsigned int _index) const;
++      public: virtual void SetAxis(unsigned int _index, const math::Vector3& _axis);
++      public: virtual bool SetHighStop(unsigned int _index, const math::Angle &_angle);
++      public: virtual bool SetLowStop(unsigned int _index, const math::Angle &_angle);
++      public: virtual math::Angle GetHighStop(unsigned int _index);
++      public: virtual math::Angle GetLowStop(unsigned int _index);
++      public: virtual void SetDamping(unsigned int _index, double _damping);
++      public: virtual void SetStiffness(unsigned int _index, const double _stiffness);
++      public: virtual void SetStiffnessDamping(unsigned int _index, double _stiffness, double _damping, double _reference = 0);
++      public: virtual void SetMaxForce(unsigned int _index, double _force);
++      public: virtual double GetMaxForce(unsigned int _index);
++      public: virtual math::Vector3 GetLinkForce(unsigned int _index) const;
++      public: virtual math::Vector3 GetLinkTorque(unsigned int _index) const;
++      public: virtual bool SetParam(const std::string &_key, unsigned int _index, const boost::any &_value);
++      public: virtual double GetParam(const std::string &_key, unsigned int _index);
++      public: virtual JointWrench GetForceTorque(unsigned int _index);
++      public: virtual void SetForce(unsigned int _index, double _force);
++      public: virtual void SetForceImpl(unsigned int _index, double _force) = 0;
++      public: virtual double GetForce(unsigned int _index);
++      public: virtual double GetForceImpl(unsigned int _index) = 0;
++      public: virtual unsigned int GetAngleCount() const;
++      public: virtual void ApplyDamping();
++
++      public:
++        RokiModelPtr GetRokiModel() const;
++        rkFDCell* GetRkFDCell() const;
++        rkChain*  GetRkChain() const;
++
++        RokiLinkPtr GetParentRokiLink() const;
++        RokiLinkPtr GetChildRokiLink() const;
++
++        virtual void SetFriction(const unsigned int _index, const double value);
++
++      public:
++        math::Vector3 anchor_pos_;
++        math::Vector3 anchor_axis_;
++        rkJoint *rkjoint_;
++        rkMotor *rkmotor_;
++        math::Pose org2anchor_pose_;
++
++        math::Angle highStop_[MAX_JOINT_AXIS];
++        math::Angle lowStop_[MAX_JOINT_AXIS];
++        double friction_[MAX_JOINT_AXIS];
++
++        std::map<std::string, boost::any> params_;
++    };
++  }
++}
++#endif
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiLink.cc gazebo/gazebo/physics/roki/RokiLink.cc
+--- gazebo.org/gazebo/physics/roki/RokiLink.cc	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiLink.cc	2016-01-09 19:26:40.311822262 +0900
+@@ -0,0 +1,503 @@
++#include <math.h>
++#include <sstream>
++
++#include "gazebo/common/Assert.hh"
++#include "gazebo/common/Console.hh"
++#include "gazebo/common/Exception.hh"
++
++#include "gazebo/physics/Collision.hh"
++#include "gazebo/physics/World.hh"
++#include "gazebo/physics/WorldPrivate.hh"
++#include "gazebo/physics/Model.hh"
++#include "gazebo/physics/Shape.hh"
++
++#include "gazebo/physics/roki/RokiModel.hh"
++#include "gazebo/physics/roki/RokiLink.hh"
++#include "gazebo/physics/roki/RokiJoint.hh"
++#include "gazebo/physics/roki/RokiCollision.hh"
++#include "gazebo/physics/roki/RokiUtils.hh"
++
++#include <sstream>
++
++using namespace gazebo;
++using namespace physics;
++
++RokiLink::RokiLink(EntityPtr _parent)
++  : Link(_parent), rklink_anchor_(nullptr), rklink_org_(nullptr), rklink_anchor_id_(-1), rklink_org_id_(-1)
++{
++  DEBUG_PRINT("RokiLink::RokiLink()\n");
++}
++
++RokiLink::~RokiLink()
++{
++  DEBUG_PRINT("RokiLink::~RokiLink()\n");
++}
++
++void RokiLink::Load(sdf::ElementPtr _sdf)
++{
++  DEBUG_PRINT("RokiLink::Load()\n");
++  Link::Load(_sdf);
++}
++
++void RokiLink::Init()
++{
++  rklink_anchor_id_ = GetRokiModel()->link_id_counter_ ++;
++  rklink_org_id_    = GetRokiModel()->link_id_counter_ ++;
++  rklink_anchor_    = rkChainLink(GetRkChain(), rklink_anchor_id_);
++  rklink_org_       = rkChainLink(GetRkChain(), rklink_org_id_);
++
++  DEBUG_PRINT("RokiLink::Roki() enter : name=%s, rklink_anchor_id_=%d, rklink_org_id_=%d\n", GetPathName().c_str(), rklink_anchor_id_, rklink_org_id_);
++
++  // initialize link
++  rkLinkInit(rklink_anchor_);
++  zNameSet(rklink_anchor_, const_cast<char*>(GetPathName().c_str()));
++  rkLinkSetStuff(rklink_anchor_, const_cast<char*>("dummy_contact_info_rigid"));
++
++  rkLinkInit(rklink_org_);
++  zNameSet(rklink_org_, const_cast<char*>(GetPathName().c_str()));
++  rkLinkSetStuff(rklink_org_, const_cast<char*>("dummy_contact_info_rigid"));
++
++  // create org joint
++  rkjoint_org_ = rkLinkJoint(rklink_org_);
++  rkJointCreate(rkjoint_org_, RK_JOINT_FIXED);
++  rkLinkAddChild(rklink_anchor_, rklink_org_);
++
++  // create anchor joint
++  rkjoint_anchor_ = rkLinkJoint(rklink_anchor_);
++  RokiJointPtr joint = GetConnectedRokiJoint();
++
++  RokiModelPtr model = GetRokiModel();
++  if (model->IsStatic() == true) {
++    DEBUG_PRINT("RokiLink::Init() rkJointCreate : name=%s, RK_JOINT_FIXED\n", GetPathName().c_str());
++    rkJointCreate(rkjoint_anchor_, RK_JOINT_FIXED);
++  }
++  else if (!joint) {
++    DEBUG_PRINT("RokiLink::InitRoki() rkJointCreate : name=%s, RK_JOINT_FLOAT\n", GetPathName().c_str());
++    rkJointCreate(rkjoint_anchor_, RK_JOINT_FLOAT);
++  }
++
++  // set position
++  SetGazeboPoseToRokiFrame();
++
++  Link::Init();
++
++  // set shapes
++  Collision_V cs = GetCollisions();
++  for (Collision_V::iterator ci = cs.begin();ci != cs.end(); ++ci) {
++    RokiCollisionPtr c = boost::dynamic_pointer_cast<RokiCollision>(*ci);
++    rkLinkShapePush(rklink_org_, c->shape_);
++  } 
++
++  this->UpdateMass();
++
++  DEBUG_PRINT("RokiLink::Init() leave : name=%s\n", GetPathName().c_str());
++}
++
++void RokiLink::Fini()
++{
++  DEBUG_PRINT("RokiLink::Fini() : name~%s\n", GetPathName().c_str());
++  Link::Fini();
++}
++
++void RokiLink::SetGravityMode(bool _mode)
++{
++  DEBUG_PRINT("RokiLink::SetGravityMode() : name=%s, mode=%s\n", GetPathName().c_str(), _mode?"true":"false");
++  this->sdf->GetElement("gravity")->Set(_mode);
++}
++
++bool RokiLink::GetGravityMode() const
++{
++  bool val = this->sdf->GetElement("gravity")->Get<bool>();
++  DEBUG_PRINT("RokiLink::GetGravityMode() : name=%s, mode=%s\n", GetPathName().c_str(), val?"true":"false");
++  return val;
++}
++
++void RokiLink::SetSelfCollide(bool _collide)
++{
++  DEBUG_PRINT("RokiLink::SetSelfCollide() : name=%s, collide=%s\n", GetPathName().c_str(), _collide?"true":"false");
++  this->sdf->GetElement("self_collide")->Set(_collide);
++
++  if (!_collide) {
++    GetRokiModel()->DisableSelfCollide();
++  }
++}
++
++void RokiLink::OnPoseChange()
++{
++  math::Pose p = GetWorldPose();
++  DEBUG_PRINT("RokiLink::OnPoseChange() enter : name=%s, world_pose=(%s)\n", GetPathName().c_str(), conv2str(p));
++
++  Link::OnPoseChange();
++  SetStateToRoki();
++
++  DEBUG_PRINT("RokiLink::OnPoseChange() leave : name=%s\n", GetPathName().c_str());
++}
++
++void RokiLink::SetEnabled(bool _enable) const
++{
++  DEBUG_PRINT("RokiLink::SetEnabled() : name=%s, _enable=%s\n", GetPathName().c_str(), _enable?"true":"false");
++}
++
++bool RokiLink::GetEnabled() const
++{
++  DEBUG_PRINT("RokiLink::GetEnabled() : name=%s\n", GetPathName().c_str());
++
++  bool result = true;
++  return result;
++}
++
++void RokiLink::UpdateSurface()
++{
++  DEBUG_PRINT("RokiLink::UpdateSurface() : name=%s\n", GetPathName().c_str());
++}
++
++void RokiLink::UpdateMass()
++{
++  double mass = this->inertial->GetMass();
++  math::Vector3 cog = this->inertial->GetCoG();
++  math::Matrix3 moi = this->inertial->GetMOI();
++
++  DEBUG_PRINT("RokiLink::UpdateMass() : name=%s, mass=%f, cog=%s, moi=%s\n", GetPathName().c_str(), mass, conv2str(cog), conv2str(moi));
++
++  rkLinkSetMass(rklink_anchor_, 0.00001);
++  zVec3DCreate(rkLinkCOM(rklink_anchor_), 0, 0, 0);
++  zMat3DCreate(
++      rkLinkInertia(rklink_anchor_),
++      moi[0][0], moi[0][1], moi[0][2],
++      moi[1][0], moi[1][1], moi[1][2],
++      moi[2][0], moi[2][1], moi[2][2]);
++
++  rkLinkSetMass(rklink_org_, mass);
++  zVec3DCreate(rkLinkCOM(rklink_org_), cog.x, cog.y, cog.z);
++  zMat3DCreate(
++      rkLinkInertia(rklink_org_),
++      moi[0][0], moi[0][1], moi[0][2],
++      moi[1][0], moi[1][1], moi[1][2],
++      moi[2][0], moi[2][1], moi[2][2]);
++}
++
++void RokiLink::SetLinearVel(const math::Vector3 &_vel)
++{
++  DEBUG_PRINT("RokiLink::SetLinerVel() : name=%s, vel~(%s)\n", GetPathName().c_str(), conv2str(_vel));
++}
++
++math::Vector3 RokiLink::GetWorldLinearVel(const math::Vector3 &_offset) const
++{
++  DEBUG_PRINT("RokiLink::GetWorldLinearVel() : name=%s, offset=(%s)\n", GetPathName().c_str(), conv2str(_offset));
++
++  math::Vector3 vec;
++  return vec;
++}
++
++math::Vector3 RokiLink::GetWorldLinearVel(const math::Vector3 &_offset,
++                                         const math::Quaternion &_q) const
++{
++  DEBUG_PRINT("RokiLink::GetWorldCoGLinearVel() : name=%s, offset=(%s), q=(%s)\n", GetPathName().c_str(), conv2str(_offset), conv2str(_q));
++
++  math::Vector3 vel;
++  return vel;
++}
++
++math::Vector3 RokiLink::GetWorldCoGLinearVel() const
++{
++  DEBUG_PRINT("RokiLink::GetWorldCoGLinearVel() : name=%s\n", GetPathName().c_str());
++
++  math::Vector3 vel;
++  return vel;
++}
++
++void RokiLink::SetAngularVel(const math::Vector3 &_vel)
++{
++  DEBUG_PRINT("RokiLink::SetAngularVel() : name=%s, vel~(%s)\n", GetPathName().c_str(), conv2str(_vel));
++}
++
++math::Vector3 RokiLink::GetWorldAngularVel() const
++{
++  DEBUG_PRINT("RokiLink::GetWorldAngularVel() : name=%s\n", GetPathName().c_str());
++
++  math::Vector3 vel;
++  return vel;
++}
++
++void RokiLink::SetForce(const math::Vector3 &_force)
++{
++  DEBUG_PRINT("RokiLink::SetForce() : name-%s, force=(%s)\n", GetPathName().c_str(), conv2str(_force));
++}
++
++void RokiLink::SetTorque(const math::Vector3 &_torque)
++{
++  DEBUG_PRINT("RokiLink::SetTorque() : name=%s, torque=(%s)\n", GetPathName().c_str(), conv2str(_torque));
++}
++
++void RokiLink::AddForce(const math::Vector3 &_force)
++{
++  DEBUG_PRINT("RokiLink::AddForce() : name-%s, force=(%s)\n", GetPathName().c_str(), conv2str(_force));
++}
++
++void RokiLink::AddRelativeForce(const math::Vector3 &_force)
++{
++  DEBUG_PRINT("RokiLink::AddRelativeForce() : name=%s, force=(%s)\n", GetPathName().c_str(), conv2str(_force));
++}
++
++void RokiLink::AddForceAtRelativePosition(const math::Vector3 &_force,
++                               const math::Vector3 &_relpos)
++{
++  DEBUG_PRINT("RokiLink::AddForceAtRelativePosition() : name=%s, force=(%s), relpos=(%s)\n", GetPathName().c_str(), conv2str(_force), conv2str(_relpos));
++}
++
++void RokiLink::AddForceAtWorldPosition(const math::Vector3 &_force,
++                                      const math::Vector3 &_pos)
++{
++  DEBUG_PRINT("RokiLink::AddForceAtWorldPosition() : name%s, force=(%s), pos=(%s)\n", GetPathName().c_str(), conv2str(_force), conv2str(_pos));
++}
++
++void RokiLink::AddLinkForce(const math::Vector3 &_force, const math::Vector3 &_offset)
++{
++  DEBUG_PRINT("RokiLink::AddLinkForce() : name-%s, force=(%s), offset=(%s)\n", GetPathName().c_str(), conv2str(_force), conv2str(_offset));
++}
++
++void RokiLink::AddTorque(const math::Vector3 &_torque)
++{
++  DEBUG_PRINT("RokiLink::AddTorque() : name=%s, torque=(%s)\n", GetPathName().c_str(), conv2str(_torque));
++}
++
++void RokiLink::AddRelativeTorque(const math::Vector3 &_torque)
++{
++  DEBUG_PRINT("RokiLink::AddRelativeTorque() name=%s, torque=(%s)\n", GetPathName().c_str(), conv2str(_torque));
++}
++
++math::Vector3 RokiLink::GetWorldForce() const
++{
++  DEBUG_PRINT("RokiLink::GetWorldForce() : name=%s\n", GetPathName().c_str());
++
++  math::Vector3 force;
++  return force;
++}
++
++math::Vector3 RokiLink::GetWorldTorque() const
++{
++  DEBUG_PRINT("RokiLink::GetWorldTorque() : name=%s\n", GetPathName().c_str());
++
++  math::Vector3 torque;
++  return torque;
++}
++
++void RokiLink::SetLinearDamping(double _damping)
++{
++  DEBUG_PRINT("RokiLink::SetLinearDamping() : name=%s, damping=%f\n", GetPathName().c_str(), _damping);
++  gzerr << "Roki does not provide RokiLink::SetLinearDamping()\n";
++}
++
++void RokiLink::SetAngularDamping(double _damping)
++{
++  DEBUG_PRINT("RokiLink::SetAngularDamping() : name=%s, damping=%f\n", GetPathName().c_str(), _damping);
++  gzerr << "Roki does not provide RokiLink::SetAngularDamping()\n";
++}
++
++void RokiLink::SetKinematic(const bool &_state)
++{
++  DEBUG_PRINT("RokiLink::SetKinematic() : name=%s\n, state=%s", GetPathName().c_str(), _state?"true":"false");
++  gzerr << "Roki does not provide RokiLink::SetKinematic()\n";
++}
++
++bool RokiLink::GetKinematic() const
++{
++  DEBUG_PRINT("RokiLink::GetKinematic() : name=%s\n", GetPathName().c_str());
++  return false;
++}
++
++void RokiLink::SetAutoDisable(bool _disable)
++{
++  DEBUG_PRINT("RokiLink::SetAutoDisable() : name=%s, disalbe~%s\n", GetPathName().c_str(), _disable?"true":"false");
++  gzerr << "Roki does not provide RokiLink::SetAutoDisable()\n";
++}
++
++void RokiLink::SetLinkStatic(bool _flag)
++{
++  DEBUG_PRINT("RokiLink::SetLinkStatic() : name=%s, flag=%s\n", GetPathName().c_str(), _flag?"true":"false");
++}
++
++///////////////////////////////////////////////////
++void RokiLink::SetStateToRoki()
++{
++  DEBUG_PRINT("RokiLink::SetStateToRoki() enter : name=%s\n", GetPathName().c_str());
++
++  if (rklink_anchor_ == nullptr || rklink_org_ == nullptr) {
++    DEBUG_PRINT("RokiLink::SetStateToRoki() leave : name=%s, rklink_ is null...\n", GetPathName().c_str());
++    return;
++  }
++
++  if (rkLinkOffset(rklink_anchor_) < 0) {
++    DEBUG_PRINT("RokiLink::SetStateToRoki() leave : name=%s, rklink_->offset<0...\n", GetPathName().c_str());
++    return;
++  }
++  
++  // gazebo pose -> roki org frame
++  SetGazeboPoseToRokiFrame();
++
++  // clear displacement
++  byte joint_type = rkLinkJointType(rklink_anchor_);
++  if (joint_type == RK_JOINT_FLOAT) {
++    rkFDCell *lc    = GetRkFDCell();
++    rkChain  *chain = GetRkChain();
++    zVec dis = zVecAlloc(rkChainJointSize(chain));
++    rkChainGetJointDisAll(chain, dis);
++
++    int chain_offset_idx = rkChainLinkOffset(chain, rklink_anchor_id_);
++    zVecElem(dis, chain_offset_idx + 0) = 0;
++    zVecElem(dis, chain_offset_idx + 1) = 0;
++    zVecElem(dis, chain_offset_idx + 2) = 0;
++    zVecElem(dis, chain_offset_idx + 3) = 0;
++    zVecElem(dis, chain_offset_idx + 4) = 0;
++    zVecElem(dis, chain_offset_idx + 5) = 0;
++
++    // apply chain displacementj
++    rkFDChainSetDis(lc, dis);
++
++    zVecFree(dis);
++  }
++
++  DEBUG_PRINT("RokiLink::SetStateToRoki() leave : name=%s\n", GetPathName().c_str());
++}
++
++void RokiLink::SetStateFromRoki()
++{
++  //DEBUG_PRINT("RokiLink::SetStateFromRoki() enter : name=%s\n", GetPathName().c_str());
++
++  if (rklink_anchor_ == nullptr || rklink_org_ == nullptr) {
++    //DEBUG_PRINT("RokiLink::SetStateFromRoki() leave : name=%s, rklink_ is null...\n", GetPathName().c_str());
++    return;
++  }
++
++  if (rkLinkOffset(rklink_anchor_) < 0 && !HaveParentRokiLink()) {
++    //DEBUG_PRINT("RokiLink::SetStateFromRoki() leave : name=%s, rklink_->offset<0 && rkLinkParent(l) is null...\n", GetPathName().c_str());
++    return;
++  }
++
++  // get frame
++  math::Pose dirty_pose  = GetDirtyPoseFromRoki(); // related pose
++  //DEBUG_PRINT("RokiLink::SetStateFromRoki() : name=%s, dirty_pose=(%s)\n", GetPathName().c_str(), conv2str(dirty_pose));
++
++  // set dirty pose (world coordinate pose)
++  this->dirtyPose = dirty_pose;
++
++  // notify dirty pose
++  this->world->dataPtr->dirtyPoses.push_back(this);
++
++  //DEBUG_PRINT("RokiLink::SetStateFromRoki() leave : name=%s\n", GetPathName().c_str());
++}
++
++std::string RokiLink::GetPathName() const
++{ 
++  RokiModelPtr model = GetRokiModel();
++  std::string model_name = model->GetName();
++  std::string link_name = GetName();
++
++  std::string link_path_name = model_name + "::" + link_name;
++
++  return link_path_name;
++}
++
++RokiModelPtr RokiLink::GetRokiModel() const
++{
++  RokiModelPtr model = boost::dynamic_pointer_cast<RokiModel>(GetModel());
++  return model;
++}
++
++RokiJointPtr RokiLink::GetConnectedRokiJoint() const
++{
++  ModelPtr model = GetModel();
++  Joint_V js = model->GetJoints();  
++
++  RokiJointPtr result_joint;
++
++  Joint_V::iterator ji;
++  for (ji = js.begin(); ji != js.end(); ++ji) {
++    LinkPtr child_link = (*ji)->GetChild();
++    if (child_link.get() == this) {
++      result_joint = boost::dynamic_pointer_cast<RokiJoint>(*ji);
++    }
++  }
++
++  return result_joint;
++}
++
++RokiLinkPtr RokiLink::GetParentRokiLink() const
++{
++  RokiJointPtr joint = GetConnectedRokiJoint();
++  if (joint) {
++    return joint->GetParentRokiLink();
++  }
++  return RokiLinkPtr();
++}
++
++bool RokiLink::HaveParentRokiLink() const
++{
++  RokiLinkPtr p = GetParentRokiLink();
++  if (p) return true;
++  return false;
++}
++
++void RokiLink::SetGazeboPoseToRokiFrame()
++{
++  math::Pose p_org_wld = GetWorldPose();
++  math::Pose frame_anchor, frame_org;
++
++  RokiJointPtr joint = GetConnectedRokiJoint();
++  RokiLinkPtr  link_parent = GetParentRokiLink();
++
++  if (!link_parent) {
++    // root link
++    frame_anchor = p_org_wld;
++    frame_org    = math::Pose::Zero;
++  }
++  else {
++    math::Pose p_parent_wld = link_parent->GetWorldPose();
++    math::Pose org2anchor_pose = joint->org2anchor_pose_;
++    math::Pose anchor2org_pose = org2anchor_pose.GetInverse();
++
++    DEBUG_PRINT("RokiLink::SetGazeboPoseToRokiFrame() : name=%s, p_org_wld=%s, p_parent_wld=%s, p_parent_wld.GetInverse()=%s\n", GetName().c_str(), conv2str(p_org_wld), conv2str(p_parent_wld), conv2str(p_parent_wld.GetInverse()));
++    DEBUG_PRINT("RokiLink::SetGazeboPoseToRokiFrame() : name=%s, org2anchor_pose=%s, anchor2org_pose=%s\n", GetName().c_str(), conv2str(org2anchor_pose), conv2str(anchor2org_pose));
++
++    // child link
++    frame_anchor = org2anchor_pose + (p_org_wld - p_parent_wld);
++    frame_org    = anchor2org_pose;
++  }
++
++  DEBUG_PRINT("RokiLink::SetGazeboPoseToRokiFrame() : name=%s, frame_anchor=%s, frame_org=%s\n", GetName().c_str(), conv2str(frame_anchor), conv2str(frame_org));
++
++  pose2zFrame3D(frame_anchor, rkLinkOrgFrame(rklink_anchor_));
++  pose2zFrame3D(frame_org,    rkLinkOrgFrame(rklink_org_));
++}
++
++math::Pose RokiLink::GetDirtyPoseFromRoki() const
++{
++  math::Pose result;
++
++  math::Pose adj_frame = conv2pose(rkLinkWldFrame(rklink_org_));
++  result = adj_frame;
++
++  return result;
++}
++
++rkChain *RokiLink::GetRkChain() const
++{
++  RokiModelPtr model = GetRokiModel();
++  return model->chain_;
++}
++
++rkFDCell *RokiLink::GetRkFDCell() const
++{
++  RokiModelPtr model = GetRokiModel();
++  return model->cell_;
++}
++
++RokiCollisionPtr RokiLink::GetRokiCollision() const
++{
++  RokiCollisionPtr c;
++  CollisionPtr p = GetCollision(0);
++  if (p) {
++    c = boost::dynamic_pointer_cast<RokiCollision>(p);
++  }
++  return c;
++}
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiLink.hh gazebo/gazebo/physics/roki/RokiLink.hh
+--- gazebo.org/gazebo/physics/roki/RokiLink.hh	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiLink.hh	2016-01-09 20:29:23.487887618 +0900
+@@ -0,0 +1,106 @@
++#ifndef _ROKILINK_HH_
++#define _ROKILINK_HH_
++
++#include "gazebo/physics/roki/RokiTypes.hh"
++
++#include "gazebo/physics/Link.hh"
++#include "gazebo/util/system.hh"
++
++#include "gazebo/physics/roki/RokiTypes.hh"
++
++#include "roki/rk_fd.h"
++#include "roki/rk_link.h"
++
++namespace gazebo
++{
++  namespace physics
++  {
++    class GZ_PHYSICS_ODE_VISIBLE RokiLink : public Link
++    {
++      public: explicit RokiLink(EntityPtr _parent);
++      public: virtual ~RokiLink();
++      public: virtual void Load(sdf::ElementPtr _sdf);
++      public: virtual void Init();
++      public: virtual void Fini();
++
++      public: virtual void OnPoseChange();
++      public: virtual void SetEnabled(bool _enable) const;
++      public: virtual bool GetEnabled() const;
++      public: virtual void UpdateMass();
++
++      public: virtual void UpdateSurface();
++      public: virtual void SetLinearVel(const math::Vector3 &_vel);
++      public: virtual void SetAngularVel(const math::Vector3 &_vel);
++
++      public: virtual void SetForce(const math::Vector3 &_force);
++      public: virtual void SetTorque(const math::Vector3 &_torque);
++
++      public: virtual void AddForce(const math::Vector3 &_force);
++      public: virtual void AddRelativeForce(const math::Vector3 &_force);
++
++      public: virtual void AddForceAtWorldPosition(const math::Vector3 &_force,
++                                                   const math::Vector3 &_pos);
++
++      public: virtual void AddForceAtRelativePosition(
++                  const math::Vector3 &_force,
++                  const math::Vector3 &_relpos);
++
++      public: virtual void AddLinkForce(const math::Vector3 &_force,
++          const math::Vector3 &_offset = math::Vector3::Zero);
++
++      public: virtual void AddTorque(const math::Vector3 &_torque);
++      public: virtual void AddRelativeTorque(const math::Vector3 &_torque);
++
++      public: virtual math::Vector3 GetWorldLinearVel(
++          const math::Vector3 &_offset) const;
++
++      public: virtual math::Vector3 GetWorldLinearVel(
++                  const math::Vector3 &_offset,
++                  const math::Quaternion &_q) const;
++
++      public: virtual math::Vector3 GetWorldCoGLinearVel() const;
++      public: virtual math::Vector3 GetWorldAngularVel() const;
++      public: virtual math::Vector3 GetWorldForce() const;
++
++      public: virtual math::Vector3 GetWorldTorque() const;
++
++      public: virtual void SetGravityMode(bool _mode);
++      public: virtual bool GetGravityMode() const;
++
++      public: void SetSelfCollide(bool _collide);
++
++      public: virtual void SetLinearDamping(double _damping);
++      public: virtual void SetAngularDamping(double _damping);
++
++      public: virtual void SetKinematic(const bool &_state);
++      public: virtual bool GetKinematic() const;
++
++      public: virtual void SetAutoDisable(bool _disable);
++
++      public: virtual void SetLinkStatic(bool _static);
++
++      public:
++        void SetStateToRoki();
++        void SetStateFromRoki();
++        std::string  GetPathName() const;
++        RokiModelPtr GetRokiModel() const;
++        RokiJointPtr GetConnectedRokiJoint() const;
++        RokiLinkPtr GetParentRokiLink() const;
++        bool HaveParentRokiLink() const;
++        void SetGazeboPoseToRokiFrame();
++        math::Pose GetDirtyPoseFromRoki() const;
++        rkFDCell *GetRkFDCell() const;
++        rkChain  *GetRkChain() const;
++        RokiCollisionPtr GetRokiCollision() const;
++
++      public:
++        rkLink    *rklink_anchor_;
++        rkLink    *rklink_org_;
++        int        rklink_anchor_id_;
++        int        rklink_org_id_;
++        rkJoint   *rkjoint_anchor_;
++        rkJoint   *rkjoint_org_;
++    };
++  }
++}
++#endif
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiMeshShape.cc gazebo/gazebo/physics/roki/RokiMeshShape.cc
+--- gazebo.org/gazebo/physics/roki/RokiMeshShape.cc	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiMeshShape.cc	2016-01-11 10:35:17.930532710 +0900
+@@ -0,0 +1,135 @@
++#include "gazebo/common/Assert.hh"
++#include "gazebo/common/Console.hh"
++#include "gazebo/common/Exception.hh"
++#include "gazebo/common/Mesh.hh"
++
++#include "gazebo/physics/roki/RokiLink.hh"
++#include "gazebo/physics/roki/RokiCollision.hh"
++#include "gazebo/physics/roki/RokiMeshShape.hh"
++#include "gazebo/physics/roki/RokiPhysics.hh"
++#include "gazebo/physics/roki/RokiUtils.hh"
++
++using namespace gazebo;
++using namespace physics;
++
++RokiMeshShape::RokiMeshShape(CollisionPtr _parent) : MeshShape(_parent)
++{
++  DEBUG_PRINT("RokiMeshShape::RokiMeshShape()\n");
++}
++
++RokiMeshShape::~RokiMeshShape()
++{
++  DEBUG_PRINT("RokiMeshShape::~RokiMeshShape()\n");
++}
++
++void RokiMeshShape::Update()
++{
++  DEBUG_PRINT("RokiMeshShape::Update()\n");
++  MeshShape::Update();
++}
++
++void RokiMeshShape::Load(sdf::ElementPtr _sdf)
++{
++  DEBUG_PRINT("RokiMeshShape::Load()\n");
++  MeshShape::Load(_sdf);
++}
++
++void RokiMeshShape::Init()
++{
++  DEBUG_PRINT("RokiMeshShape::Init()\n");
++  MeshShape::Init();
++
++  if (this->submesh)
++  {
++     InitMesh_(this->submesh, this->sdf->Get<math::Vector3>("scale"));
++  }
++  else
++  {
++     InitMesh_(this->mesh, this->sdf->Get<math::Vector3>("scale"));
++  }
++}
++
++void RokiMeshShape::InitMesh_(const common::SubMesh *_subMesh,  const math::Vector3 &_scale)
++{
++  RokiCollisionPtr collision = boost::dynamic_pointer_cast<RokiCollision>(this->collisionParent);
++  RokiLinkPtr link = boost::dynamic_pointer_cast<RokiLink>(this->collisionParent->GetLink());
++
++  DEBUG_PRINT("RokiMeshShape::InitMesh_() link=%s, name=%s, type=%s\n", link->GetName().c_str(), GetName().c_str(), "_subMesh");
++
++  float *vertices = NULL;
++  int   *indices  = NULL;
++
++  _subMesh->FillArrays(&vertices, &indices);
++
++  this->CreateMesh_(
++    vertices, _subMesh->GetVertexCount(),
++    indices, _subMesh->GetIndexCount(),
++    _scale);
++
++  delete [] vertices;
++  delete [] indices;
++}
++
++void RokiMeshShape::InitMesh_(const common::Mesh *_mesh, const math::Vector3 &_scale)
++{
++  RokiCollisionPtr collision = boost::dynamic_pointer_cast<RokiCollision>(this->collisionParent);
++  RokiLinkPtr link = boost::dynamic_pointer_cast<RokiLink>(this->collisionParent->GetLink());
++
++  DEBUG_PRINT("RokiMeshShape::InitMesh_() link=%s, name=%s, type=%s\n", link->GetName().c_str(), GetName().c_str(),"_mesh");
++
++  float *vertices = NULL;
++  int   *indices  = NULL;
++
++  _mesh->FillArrays(&vertices, &indices);
++
++  this->CreateMesh_(
++    vertices, _mesh->GetVertexCount(),
++    indices, _mesh->GetIndexCount(),
++    _scale);
++
++  delete [] vertices;
++  delete [] indices;
++}
++
++void RokiMeshShape::CreateMesh_(float *_vertices, unsigned int _numVertices, int *_indices, unsigned int _numIndices, const math::Vector3 &_scale)
++{
++  RokiCollisionPtr collision = boost::dynamic_pointer_cast<RokiCollision>(this->collisionParent);
++  RokiLinkPtr link = boost::dynamic_pointer_cast<RokiLink>(this->collisionParent->GetLink());
++
++  DEBUG_PRINT("RokiMeshShape:CreatetMesh_() link=%s, name=%s, _numVertices=%d, _numIndices,=%d\n", link->GetName().c_str(), GetName().c_str(), _numVertices, _numIndices);
++
++  zShape3D *shape = zAlloc(zShape3D, 1);
++  zShape3DInit(shape);
++  zShape3DType(shape) = ZSHAPE_PH; // polyhedron
++
++  shape->com = &zprim_ph3d_com;    // function valiable
++
++  zPH3D* ph = (zPH3D*)&shape->body;
++  zPH3DInit(ph);
++
++  zPH3DAlloc(ph, _numVertices, _numIndices/3);
++
++  for (unsigned int i = 0; i < _numVertices; ++i) {
++    zVec3D* v;
++    v = zPH3DVert(ph, i);
++    zVec3DSetElem(v, zX, _vertices[i * 3 + 0] * _scale.x);
++    zVec3DSetElem(v, zY, _vertices[i * 3 + 1] * _scale.y);
++    zVec3DSetElem(v, zZ, _vertices[i * 3 + 2] * _scale.z);
++  }
++
++  for (unsigned int i = 0; i < _numIndices/3; ++i) {
++    zTri3DCreate(
++      zPH3DFace(ph, i),
++      zPH3DVert(ph, _indices[i * 3 + 0]),
++      zPH3DVert(ph, _indices[i * 3 + 1]),
++      zPH3DVert(ph, _indices[i * 3 + 2]));
++  }
++
++  zAABox3D aabb;
++  zAABB(&aabb, zShape3DVertBuf(shape), zShape3DVertNum(shape), NULL);
++  zAABox3DToBox3D(&aabb, zShape3DBB(shape));
++
++  zNameSet(shape, const_cast<char*>(link->GetPathName().c_str()));
++
++  collision->shape_ = shape;
++}
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiMeshShape.hh gazebo/gazebo/physics/roki/RokiMeshShape.hh
+--- gazebo.org/gazebo/physics/roki/RokiMeshShape.hh	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiMeshShape.hh	2016-01-02 14:58:27.082220970 +0900
+@@ -0,0 +1,25 @@
++#ifndef _ROKIMESHSHAPE_HH_
++#define _ROKIMESHSHAPE_HH_
++
++#include "gazebo/physics/MeshShape.hh"
++#include "gazebo/util/system.hh"
++
++namespace gazebo
++{
++  namespace physics
++  {
++    class GZ_PHYSICS_VISIBLE RokiMeshShape : public MeshShape
++    {
++      public: explicit RokiMeshShape(CollisionPtr _parent);
++      public: virtual ~RokiMeshShape();
++      public: virtual void Load(sdf::ElementPtr _sdf);
++      public: virtual void Init();
++      public: virtual void Update();
++      private:
++        void InitMesh_(const common::SubMesh *_subMesh,  const math::Vector3 &_scale);
++        void InitMesh_(const common::Mesh *_mesh, const math::Vector3 &_scale);
++        void CreateMesh_(float *_vertices, unsigned int _numVertices, int *_indices, unsigned int _numIndices, const math::Vector3 &_scale);
++    };
++  }
++}
++#endif
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiModel.cc gazebo/gazebo/physics/roki/RokiModel.cc
+--- gazebo.org/gazebo/physics/roki/RokiModel.cc	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiModel.cc	2015-12-29 16:42:41.992318640 +0900
+@@ -0,0 +1,94 @@
++#include "gazebo/physics/World.hh"
++#include "gazebo/physics/roki/RokiPhysics.hh"
++#include "gazebo/physics/roki/RokiModel.hh"
++#include "gazebo/physics/roki/RokiLink.hh"
++#include "gazebo/physics/roki/RokiUtils.hh"
++
++#include "roki/rk_link.h"
++
++using namespace gazebo;
++using namespace physics;
++
++extern "C" {
++    rkFDCell* _rkFDCellPush(rkFD* fd, rkFDCell* lc);
++}
++
++RokiModel::RokiModel(BasePtr _parent)
++  : Model(_parent), cell_(nullptr), chain_(nullptr), link_id_counter_(0), self_collide_(true)
++{
++  DEBUG_PRINT("RokiModel::RokiModel()\n");
++}
++
++RokiModel::~RokiModel()
++{
++  DEBUG_PRINT("RokiModel::~RokiModel()\n");
++}
++
++void RokiModel::Init()
++{
++  int link_size = GetLinks().size();
++  DEBUG_PRINT("RokiModel::Init() enter : name=%s, link_size=%d\n", GetName().c_str(), link_size);
++
++  std::string modelName = this->GetName();
++
++  cell_  = zAlloc(rkFDCell, 1);
++  chain_ = &(cell_->data.chain);
++  rkChainInit(chain_);
++  zNameSet(chain_, const_cast<char*>(modelName.c_str()));
++
++  Link_V ls = GetLinks();
++
++  zArrayAlloc(&(chain_->link), rkLink, link_size * 2);
++
++  // travers link->InitRoki()
++  DEBUG_PRINT("RokiModel::Init() call Model::Init(): name=%s\n", GetName().c_str());
++  Model::Init();
++  DEBUG_PRINT("RokiModel::Init() return Model::Init(): name=%s\n", GetName().c_str());
++
++  double mass = 0.0;
++  for (Link_V::iterator li = ls.begin(); li != ls.end(); ++li) { 
++    RokiLinkPtr link = boost::dynamic_pointer_cast<RokiLink>(*li);
++    mass += link->GetInertial()->GetMass();
++  }
++  rkChainSetMass(chain_, mass); 
++
++  rkChainSetOffset(chain_);
++  rkChainUpdateFK(chain_);
++  rkChainUpdateID(chain_);
++
++  rkFD *fd = GetRkFD();
++
++  _rkFDCellPush(fd, cell_);
++  rkFDUpdateInit(fd);
++
++  if (!self_collide_) {
++    DEBUG_PRINT("RokiModel::Init() rkCDPairChainUnreg() : name=%s\n", GetName().c_str());
++    rkCDPairChainUnreg(&fd->cd, &cell_->data.chain);
++  }
++
++  // update displacement
++  DEBUG_PRINT("RokiModel::InitRoki() force links->OnPoseChange() : name=%s\n", GetName().c_str());
++  for (Link_V::iterator li = ls.begin(); li != ls.end(); ++li) { 
++    RokiLinkPtr link = boost::dynamic_pointer_cast<RokiLink>(*li);
++    link->OnPoseChange();
++  }
++
++  DEBUG_PRINT("RokiModel::Init() leave : name=%s\n", GetName().c_str());
++}
++
++void RokiModel::Fini() 
++{
++  DEBUG_PRINT("RokiModel::Fini() : name=%s\n", GetName().c_str());
++
++  Model::Fini();
++}
++
++void RokiModel::DisableSelfCollide()
++{
++  self_collide_ = false;
++}
++
++rkFD* RokiModel::GetRkFD() const
++{
++  return (boost::dynamic_pointer_cast<RokiPhysics>(this->GetWorld()->GetPhysicsEngine()))->fd_;
++}
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiModel.hh gazebo/gazebo/physics/roki/RokiModel.hh
+--- gazebo.org/gazebo/physics/roki/RokiModel.hh	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiModel.hh	2015-12-29 16:23:58.769633041 +0900
+@@ -0,0 +1,32 @@
++#ifndef _ROKIMODEL_HH_
++#define _ROKIMODEL_HH_
++
++#include "gazebo/physics/Model.hh"
++#include "roki/rk_fd.h"
++#include "roki/rk_link.h"
++#include "roki/rk_joint.h"
++
++namespace gazebo
++{
++  namespace physics
++  {
++    class GZ_PHYSICS_VISIBLE RokiModel : public Model
++    {
++      public: explicit RokiModel(BasePtr _parent);
++      public: virtual ~RokiModel();
++      public: virtual void Init();
++      public: virtual void Fini();
++
++      public:
++        void DisableSelfCollide();
++        rkFD* GetRkFD() const;
++
++      public:
++        rkFDCell *cell_;
++        rkChain  *chain_;
++        int      link_id_counter_;
++        bool     self_collide_;
++    };
++  }
++}
++#endif
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiPhysics.cc gazebo/gazebo/physics/roki/RokiPhysics.cc
+--- gazebo.org/gazebo/physics/roki/RokiPhysics.cc	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiPhysics.cc	2016-01-11 20:18:52.045960888 +0900
+@@ -0,0 +1,523 @@
++#ifdef _WIN32
++  #include <Winsock2.h>
++#endif
++
++#include <sdf/sdf.hh>
++
++#include <algorithm>
++#include <map>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "gazebo/util/Diagnostics.hh"
++#include "gazebo/common/Assert.hh"
++#include "gazebo/common/Console.hh"
++#include "gazebo/common/Exception.hh"
++#include "gazebo/math/Vector3.hh"
++#include "gazebo/math/Rand.hh"
++#include "gazebo/common/Time.hh"
++#include "gazebo/common/Timer.hh"
++
++#include "gazebo/transport/Publisher.hh"
++
++#include "gazebo/physics/PhysicsTypes.hh"
++#include "gazebo/physics/PhysicsFactory.hh"
++#include "gazebo/physics/World.hh"
++#include "gazebo/physics/Entity.hh"
++#include "gazebo/physics/Model.hh"
++#include "gazebo/physics/SurfaceParams.hh"
++#include "gazebo/physics/Collision.hh"
++#include "gazebo/physics/MapShape.hh"
++#include "gazebo/physics/ContactManager.hh"
++
++#include "gazebo/physics/roki/RokiPhysics.hh"
++#include "gazebo/physics/roki/RokiModel.hh"
++#include "gazebo/physics/roki/RokiLink.hh"
++#include "gazebo/physics/roki/RokiCollision.hh"
++#include "gazebo/physics/roki/RokiBoxShape.hh"
++#include "gazebo/physics/roki/RokiCylinderShape.hh"
++#include "gazebo/physics/roki/RokiSphereShape.hh"
++#include "gazebo/physics/roki/RokiPlaneShape.hh"
++#include "gazebo/physics/roki/RokiMeshShape.hh"
++#include "gazebo/physics/roki/RokiHingeJoint.hh"
++#include "gazebo/physics/roki/RokiSliderJoint.hh"
++#include "gazebo/physics/roki/RokiFixedJoint.hh"
++#include "gazebo/physics/roki/RokiUtils.hh"
++
++using namespace gazebo;
++using namespace physics;
++
++GZ_REGISTER_PHYSICS_ENGINE("roki", RokiPhysics)
++
++RokiPhysics::RokiPhysics(WorldPtr _world)
++  : PhysicsEngine(_world) , fd_(nullptr),
++    contact_info_compensation_(1000),
++    contact_info_relaxation_(.01),
++    contact_info_static_friction_(5.0),
++    contact_info_friction_(3.0),
++    solver_type_(SOLVER_VOLUME)
++{
++  DEBUG_PRINT("RokiPhysics::RokiPhysics()\n");
++}
++
++RokiPhysics::~RokiPhysics()
++{
++  DEBUG_PRINT("RokiPhysics::~RokiPhysics()\n");
++}
++
++bool RokiPhysics::IsInitFD_()
++{
++  if (fd_ != nullptr) return true;
++  return false;
++}
++
++void RokiPhysics::InitFD_()
++{
++  DEBUG_PRINT("RokiPhysics::InitFD_() : enter\n");
++  if (IsInitFD_()) ReleaseFD_();
++
++  fd_ = zAlloc(rkFD, 1);
++  rkFDCreate(fd_);
++
++  // dummy contact info
++  zArrayAlloc(&(fd_->ci), rkContactInfo, 1);
++  rkContactInfo *ci;
++  ci = zArrayElem(&fd_->ci, 0);
++  rkContactInfoInit(ci);
++  rkContactInfoRigidCreate(
++      ci, 
++        contact_info_compensation_,
++        contact_info_relaxation_,
++        contact_info_static_friction_,
++        contact_info_friction_,
++        (char*)"dummy_contact_info_rigid",
++        (char*)"dummy_contact_info_rigid");
++
++  // append dummy object
++  dummy_roki_object_ = DummyRokiObjectPtr(new DummyRokiObject(fd_));
++
++  // setup rkFD
++  rkFDODE2Assign(fd_, Regular);
++  //rkFDODE2AssignRegular(fd_, Euler);
++  //rkFDODE2AssignRegular(fd_, Heun);
++  //rkFDODE2AssignRegular(fd_, RK4);
++  rkFDODE2AssignRegular(fd_, RKG);
++  //rkFDODE2AssignRegular(fd_, RKF45);  // NG
++  //rkFDODE2AssignRegular(fd_, Adams);  // NG
++  //rkFDODE2AssignRegular(fd_, BEuler); // NG
++  //rkFDODE2AssignRegular(fd_, TR);     // NG
++  //rkFDODE2AssignRegular(fd_, BK4);    // NG
++  //rkFDODE2AssignRegular(fd_, Gear);   // NG
++
++  DEBUG_PRINT("RokiPhysics::InitFD_() : this->realTimeUpdateRate=%f\n", this->realTimeUpdateRate);
++  rkFDSetDT(fd_, 0.01); // dummy
++  if (solver_type_ == SOLVER_VERT) {
++    rkFDSetSolver(fd_, Vert);  // Volume or Vert. default: Vert
++  }
++  else {
++    rkFDSetSolver(fd_, Volume);
++  }
++  rkFDUpdateInit(fd_);
++
++  DEBUG_PRINT("RokiPhysics::InitFD_() : leave\n");
++}
++
++void RokiPhysics::ReleaseFD_()
++{
++  DEBUG_PRINT("RokiPhysics::ReleaseFD_() : enter\n");
++  if (fd_ != nullptr) {
++    //rkFDUpdateDestroy(fd_);
++    rkFDDestroy(fd_);
++    zFree(fd_);
++    fd_ = nullptr;
++  }
++  DEBUG_PRINT("RokiPhysics::ReleaseFD_() : leave\n");
++}
++
++void RokiPhysics::Load(sdf::ElementPtr _sdf)
++{
++  sdf::ElementPtr e_roki;
++  sdf::ElementPtr e_ci;
++
++  // enable debug print
++  if (_sdf->HasElement("roki") == true) {
++    e_roki = _sdf->GetElement("roki");
++    if(e_roki->Get<bool>("debug_print")) {
++        ENABLE_DEBUG_PRINT();
++        DEBUG_PRINT("RokiPhysics::Load() : ENABLE_DEBUG_PRINT()\n");
++    }
++  }
++
++  DEBUG_PRINT("RokiPhysics::Load() : enter\n");
++
++  // Elements for Roki settings
++  if (_sdf->HasElement("roki") == true) {
++    DEBUG_PRINT("RokiPhysics::Load() : <roki> tag found in sdf...name=%s\n", _sdf->GetName().c_str());
++
++    e_roki = _sdf->GetElement("roki");
++
++    if (e_roki->HasElement("contact_info")) {
++
++      e_ci = e_roki->GetElement("contact_info");
++
++      if (e_ci->HasElement("compensation")) {
++        contact_info_compensation_ = e_ci->Get<double>("compensation");
++      }
++      if (e_ci->HasElement("relaxation")) {
++        contact_info_relaxation_ = e_ci->Get<double>("relaxation");
++      }
++      if (e_ci->HasElement("static_friction")) {
++        contact_info_static_friction_ = e_ci->Get<double>("static_friction");
++      }
++      if (e_ci->HasElement("friction")) {
++        contact_info_friction_ = e_ci->Get<double>("friction");
++      }
++    }
++
++    if (e_roki->HasElement("solver_type")) {
++      std::string solver_type_str = e_roki->Get<std::string>("solver_type");
++      std::transform(solver_type_str.begin(), solver_type_str.end(), solver_type_str.begin(), ::tolower);
++      if (solver_type_str == "vert" || solver_type_str == "vertex") {
++        solver_type_ = SOLVER_VERT;
++      }
++      else {
++        solver_type_ = SOLVER_VOLUME;
++      }
++    }
++  }
++  else {
++    DEBUG_PRINT("RokiPhysics::Load() : <roki> tag not found in sdf...name=%s\n", this->sdf->GetName().c_str());
++  }
++
++  DEBUG_PRINT("RokiPhysics::Load() : contact_info_compensation_=%f, contact_info_relaxation_=%f, contact_info_static_friction_=%f, contact_info_friction_=%f, solver_type=%s\n", contact_info_compensation_, contact_info_relaxation_, contact_info_static_friction_, contact_info_friction_, (solver_type_ == SOLVER_VERT?"VERT":"VOLUME"));
++
++  InitFD_();
++  PhysicsEngine::Load(_sdf);
++
++  DEBUG_PRINT("RokiPhysics::Load() : leave\n");
++}
++
++void RokiPhysics::Init()
++{
++  printf("RokiPhysics::Init()\n");
++  DEBUG_PRINT("RokiPhysics::Init() : rkFDUpdateInit(fd_)\n");
++  rkFDUpdateInit(fd_);
++  DEBUG_PRINT("RokiPhysics::Init() : leave\n");
++}
++
++void RokiPhysics::Reset()
++{
++  DEBUG_PRINT("RokiPhysics::Reset()\n");
++  boost::recursive_mutex::scoped_lock lock(*this->physicsUpdateMutex);
++}
++
++void RokiPhysics::InitForThread()
++{
++  DEBUG_PRINT("RokiPhysics::InitForThread()\n");
++}
++
++void RokiPhysics::UpdateCollision()
++{
++  //DEBUG_PRINT("RokiPhysics::UpdateCollision()\n");
++  rkCDPair *cdp;
++  rkCDVert *cdv;
++  rkCDVert *v;
++  rkCDCellDat *celld[2];
++  zVec3D f0, f1, t0, t1;
++
++  RokiLinkPtr      link0, link1;
++  RokiCollisionPtr collision0, collision1;
++  math::Vector3    pos, norm, pro;
++  math::Vector3    force0, force1;
++  math::Vector3    torque0, torque1;
++
++  zListForEach(&fd_->cd.plist, cdp){
++    if(!cdp->data.is_col) continue;
++
++    link0 = GetRokiLinkByPathName(zName(cdp->data.cell[0]->data.shape));
++    link1 = GetRokiLinkByPathName(zName(cdp->data.cell[1]->data.shape));
++
++    if (!link0 || !link1) continue;
++
++    collision0 = link0->GetRokiCollision();
++    collision1 = link1->GetRokiCollision();
++
++    if (!collision0 || !collision1) continue;
++
++    //DEBUG_PRINT("RokiPhysics::UpdateCollision() : cdv_num=%d\n", cdp->data.vlist.num);
++    zListForEach(&cdp->data.vlist, cdv) {
++      celld[0] = &cdv->data.cell->data;
++      celld[1] = cdv->data.cell != cdp->data.cell[0] ? &cdp->data.cell[0]->data : &cdp->data.cell[1]->data;
++
++      if (celld[0]->type == RK_CD_CELL_STAT) continue;
++      if (celld[1]->type == RK_CD_CELL_STAT) continue;
++
++      zListForEach(&cdp->data.vlist, v){
++        zXfer3DInv(rkLinkWldFrame(celld[0]->link), cdv->data.vert, &f0);
++        zXfer3DInv(rkLinkWldFrame(celld[1]->link), cdv->data.vert, &f1);
++        zMulMatTVec3D(rkLinkWldAtt(celld[0]->link), &cdv->data.axis[0], &t0);
++        zMulMatTVec3D(rkLinkWldAtt(celld[1]->link), &cdv->data.axis[1], &t1);
++        zVec3DMulDRC(&t1, -1.0);
++
++        pos = math::Vector3(
++                zVec3DElem(v->data.vert, 0),
++                zVec3DElem(v->data.vert, 1),
++                zVec3DElem(v->data.vert, 2));
++
++        norm = math::Vector3(
++                zVec3DElem(&v->data.norm, 0),
++                zVec3DElem(&v->data.norm, 1),
++                zVec3DElem(&v->data.norm, 2));
++
++        pro = math::Vector3(
++                zVec3DElem(&v->data.pro, 0),
++                zVec3DElem(&v->data.pro, 1),
++                zVec3DElem(&v->data.pro, 2));
++
++        force0 = math::Vector3(
++                zVec3DElem(&f0, 0),
++                zVec3DElem(&f0, 1),
++                zVec3DElem(&f0, 2));
++
++        force1 = math::Vector3(
++                zVec3DElem(&f1, 0),
++                zVec3DElem(&f1, 1),
++                zVec3DElem(&f1, 2));
++        
++        torque0 = math::Vector3(
++                zVec3DElem(&t0, 0),
++                zVec3DElem(&t0, 1),
++                zVec3DElem(&t0, 2));
++        
++        torque1 = math::Vector3(
++                zVec3DElem(&t1, 0),
++                zVec3DElem(&t1, 1),
++                zVec3DElem(&t1, 2));
++
++        Contact *contactFeedback = this->GetContactManager()->NewContact(
++            collision0.get(), collision1.get(),
++            this->world->GetSimTime());
++
++        if (contactFeedback == nullptr) continue;
++
++        contactFeedback->positions[0] = pos;
++        contactFeedback->normals[0] = norm;
++        contactFeedback->depths[0] = (pro - pos).GetLength();
++
++        if (!link0->IsStatic()) { 
++          contactFeedback->wrench[0].body1Force  = force0;
++          contactFeedback->wrench[0].body1Torque = torque0;
++        }
++        if (!link1->IsStatic()) {
++          contactFeedback->wrench[0].body2Force  = force1;
++          contactFeedback->wrench[0].body2Torque = torque1;
++        }
++        ++contactFeedback->count;
++      }
++    }
++  }
++}
++
++void RokiPhysics::UpdatePhysics()
++{
++  boost::recursive_mutex::scoped_lock lock(*this->physicsUpdateMutex);
++
++  //DEBUG_PRINT("RokiPhysics::UpdatePhysics() enter : maxStepSize=%f\n", this->GetMaxStepSize());
++
++  rkFDSetDT(fd_, this->GetMaxStepSize());
++  rkFDUpdate(fd_);
++
++  Model_V models = this->world->GetModels();
++  for (Model_V::iterator mi = models.begin(); mi != models.end(); ++mi) {
++    Link_V links = (*mi)->GetLinks();
++    for (Link_V::iterator li = links.begin(); li != links.end(); ++li) { 
++      RokiLinkPtr link = boost::dynamic_pointer_cast<RokiLink>(*li);
++      link->SetStateFromRoki();
++    }
++  }
++
++  //DEBUG_PRINT("RokiPhysics::UpdatePhysics() leave : \n");
++}
++
++void RokiPhysics::Fini()
++{
++  printf("RokiPhysics::Fini()\n");
++  PhysicsEngine::Fini();
++  ReleaseFD_();
++}
++
++void RokiPhysics::SetSeed(uint32_t _seed)
++{
++  DEBUG_PRINT("RokiPhysics::SetSeed() : seed=%d\n", _seed);
++}
++
++ModelPtr RokiPhysics::CreateModel(BasePtr _base)
++{
++  DEBUG_PRINT("RokiPhysics::CreateModel()\n");
++  ModelPtr model(new RokiModel(_base));
++  return model;
++}
++
++LinkPtr RokiPhysics::CreateLink(ModelPtr _parent)
++{
++  DEBUG_PRINT("RokiPhysics::CreateLink() : parent_model=%s\n", _parent->GetName().c_str());
++
++  if (_parent == NULL)
++    gzthrow("Link must have a parent\n");
++
++  LinkPtr link(new RokiLink(_parent));
++  link->SetWorld(_parent->GetWorld());
++  return link;
++}
++
++CollisionPtr RokiPhysics::CreateCollision(const std::string &_type,
++                                         LinkPtr _body)
++{
++  DEBUG_PRINT("RokiPhysics::CreateCollision() : type=%s\n", _type.c_str());
++
++  CollisionPtr collision(new RokiCollision(_body));
++
++  ShapePtr shape = CreateShape(_type, collision);
++  collision->SetShape(shape);
++  shape->SetWorld(_body->GetWorld());
++  return collision;
++}
++
++ShapePtr RokiPhysics::CreateShape(const std::string &_type,
++                                 CollisionPtr _collision)
++{
++  DEBUG_PRINT("RokiPhysics::CreateShape() : type=%s\n", _type.c_str());
++
++  ShapePtr shape;
++  RokiCollisionPtr collision = boost::dynamic_pointer_cast<RokiCollision>(_collision);
++
++  if (_type == "sphere") {
++    shape.reset(new RokiSphereShape(collision));
++  }
++  else if (_type == "plane") {
++    shape.reset(new RokiPlaneShape(collision));
++  }
++  else if (_type == "box") {
++    shape.reset(new RokiBoxShape(collision));
++  }
++  else if (_type == "cylinder") {
++    shape.reset(new RokiCylinderShape(collision));
++  }
++  else if (_type == "mesh" || _type == "trimesh") {
++    shape.reset(new RokiMeshShape(collision));
++  }
++  else if (_type == "map" || _type == "image") {
++    shape.reset(new MapShape(collision)); 
++  }
++  else {
++    gzerr << "Unable to create collision of type[" << _type << "]\n";
++  }
++
++  return shape;
++}
++
++JointPtr RokiPhysics::CreateJoint(const std::string &_type,
++                                  ModelPtr _parent)
++{
++  DEBUG_PRINT("RokiPhysics::CreateJoint() : parent_model=%s, type=%s\n", _parent->GetName().c_str(), _type.c_str());
++
++  JointPtr joint;
++
++  if (_type == "prismatic") {
++    joint.reset(new RokiSliderJoint(_parent));
++  } else if (_type == "fixed") {
++    joint.reset(new RokiFixedJoint(_parent));
++  } else if (_type == "revolute") {
++    joint.reset(new RokiHingeJoint(_parent));
++  }
++  else {
++    gzerr << "Unable to create joint of type[" << _type << "]";
++  }
++
++  return joint; 
++}
++
++void RokiPhysics::SetGravity(const gazebo::math::Vector3 &_gravity)
++{
++  DEBUG_PRINT("RokiPhysics::SetGravity() : _gravity=%f, %f, %f)\n", _gravity.x, _gravity.y, _gravity.z);
++  this->sdf->GetElement("gravity")->Set(_gravity);
++}
++
++void RokiPhysics::DebugPrint() const
++{
++  DEBUG_PRINT("RokiPhysics::DebugPrint()\n");
++}
++
++bool RokiPhysics::SetParam(const std::string &_key, const boost::any &_value)
++{
++  DEBUG_PRINT("RokiPhysics::SetParam() : key=%s, value~%s\n", _key.c_str(),any2str(_value));
++  return PhysicsEngine::SetParam(_key, _value);
++}
++
++boost::any RokiPhysics::GetParam(const std::string &_key) const
++{
++  boost::any value;
++  this->GetParam(_key, value);
++
++  DEBUG_PRINT("RokiPhysics::GetParam() : key=%s, value~%s\n", _key.c_str(), any2str(value));
++  return value;
++}
++
++bool RokiPhysics::GetParam(const std::string &_key, boost::any &_value) const
++{
++  bool rv = PhysicsEngine::GetParam(_key, _value);
++  DEBUG_PRINT("RokiPhysics::GetParam() : key=%s, value~%s\n", _key.c_str(), any2str(_value));
++  return rv;
++}
++
++void RokiPhysics::OnRequest(ConstRequestPtr &_msg)
++{
++  DEBUG_PRINT("RokiPhysics::OnRequest() : msg=(%s, %s, %f)\n", _msg->request().c_str(), _msg->data().c_str(), _msg->dbl_data());
++}
++
++void RokiPhysics::OnPhysicsMsg(ConstPhysicsPtr &_msg)
++{
++  DEBUG_PRINT("RokiPhysics::OnPhysicsMsg() : msg=()\n");
++  PhysicsEngine::OnPhysicsMsg(_msg);
++
++  if (_msg->has_enable_physics())
++    this->world->EnablePhysicsEngine(_msg->enable_physics());
++
++  if (_msg->has_gravity())
++    this->SetGravity(msgs::ConvertIgn(_msg->gravity()));
++
++  if (_msg->has_real_time_factor())
++    this->SetTargetRealTimeFactor(_msg->real_time_factor());
++
++  if (_msg->has_real_time_update_rate())
++  {
++    this->SetRealTimeUpdateRate(_msg->real_time_update_rate());
++  }
++
++  if (_msg->has_max_step_size())
++  {
++    this->SetMaxStepSize(_msg->max_step_size());
++  }
++
++  this->world->EnableAllModels();
++}
++
++RokiLinkPtr RokiPhysics::GetRokiLinkByPathName(const char *path_name)
++{
++  RokiLinkPtr result_link;
++
++  Model_V models = this->world->GetModels();
++  for (Model_V::iterator mi = models.begin(); mi != models.end(); ++mi) {
++    Link_V links = (*mi)->GetLinks();
++    for (Link_V::iterator li = links.begin(); li != links.end(); ++li) { 
++      RokiLinkPtr roki_link = boost::dynamic_pointer_cast<RokiLink>(*li);
++      if (roki_link->GetPathName() == path_name) {
++        result_link = roki_link;
++        break;
++      }
++    }
++  }
++
++  return result_link;
++}
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiPhysics.hh gazebo/gazebo/physics/roki/RokiPhysics.hh
+--- gazebo.org/gazebo/physics/roki/RokiPhysics.hh	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiPhysics.hh	2016-01-09 20:08:07.220340113 +0900
+@@ -0,0 +1,84 @@
++#ifndef _ROKIPHYSICS_HH_
++#define _ROKIPHYSICS_HH_
++
++#include "gazebo/physics/PhysicsEngine.hh"
++#include <string>
++
++#include "gazebo/physics/roki/RokiTypes.hh"
++#include "gazebo/physics/roki/RokiUtils.hh"
++
++#include "roki/rk_fd.h"
++
++namespace gazebo
++{
++  namespace physics
++  {
++    class GZ_PHYSICS_ODE_VISIBLE RokiPhysics : public PhysicsEngine 
++    {
++      public: enum RokiParam
++      {
++        SOLVER_VERT,
++        SOLVER_VOLUME
++      };
++
++      public: RokiPhysics(WorldPtr _world);
++      public: virtual ~RokiPhysics();
++
++      public: virtual void Load(sdf::ElementPtr _sdf);
++      public: virtual void Init();
++      public: virtual void Reset();
++      public: virtual void InitForThread();
++      public: virtual void UpdateCollision();
++      public: virtual void UpdatePhysics();
++      public: virtual void Fini();
++
++      public: virtual std::string GetType() const
++                      { return "roki"; }
++      public: virtual void SetSeed(uint32_t _seed);
++
++      public: virtual ModelPtr CreateModel(BasePtr _base);
++
++      public: virtual LinkPtr CreateLink(ModelPtr _parent);
++      public: virtual CollisionPtr CreateCollision(
++                  const std::string &_shapeType, LinkPtr _parent);
++      public: virtual ShapePtr CreateShape(const std::string &_shapeType,
++                                           CollisionPtr _collision);
++      public: virtual JointPtr CreateJoint(const std::string &_type,
++                                           ModelPtr _parent);
++
++      public: virtual void SetGravity(const gazebo::math::Vector3 &_gravity);
++
++      public: virtual void DebugPrint() const;
++
++      public: virtual bool SetParam(const std::string &_key,
++                  const boost::any &_value);
++
++      public: virtual boost::any GetParam(const std::string &_key) const;
++
++      public: virtual bool GetParam(const std::string &_key,
++                  boost::any &_value) const;
++
++      protected: virtual void OnRequest(ConstRequestPtr &_msg);
++      protected: virtual void OnPhysicsMsg(ConstPhysicsPtr &_msg);
++
++      private:
++        void InitFD_();
++        void ReleaseFD_();
++        bool IsInitFD_();
++        RokiLinkPtr GetRokiLinkByPathName(const char *path_name);
++
++      public:
++        rkFD *fd_;
++
++        double contact_info_compensation_;
++        double contact_info_relaxation_;
++        double contact_info_static_friction_;
++        double contact_info_friction_;
++        enum RokiParam solver_type_;
++
++      private:
++        DummyRokiObjectPtr dummy_roki_object_;
++    };
++  }
++}
++#endif
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiPhysics_TEST.cc gazebo/gazebo/physics/roki/RokiPhysics_TEST.cc
+--- gazebo.org/gazebo/physics/roki/RokiPhysics_TEST.cc	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiPhysics_TEST.cc	2015-12-17 15:52:04.374904306 +0900
+@@ -0,0 +1,75 @@
++#include <gtest/gtest.h>
++
++#include "gazebo/physics/physics.hh"
++#include "gazebo/physics/PhysicsEngine.hh"
++#include "gazebo/physics/roki/RokiPhysics.hh"
++#include "gazebo/test/ServerFixture.hh"
++
++using namespace gazebo;
++using namespace physics;
++
++class RokiPhysics_TEST : public ServerFixture
++{
++  public: void PhysicsMsgParam();
++  public: void OnPhysicsMsgResponse(ConstResponsePtr &_msg);
++  public: static msgs::Physics physicsPubMsg;
++  public: static msgs::Physics physicsResponseMsg;
++};
++
++msgs::Physics RokiPhysics_TEST::physicsPubMsg;
++msgs::Physics RokiPhysics_TEST::physicsResponseMsg;
++
++TEST_F(RokiPhysics_TEST, PhysicsParam)
++{
++  std::string physicsEngineStr = "roki";
++  Load("worlds/empty.world", true, physicsEngineStr);
++  WorldPtr world = get_world("default");
++  ASSERT_TRUE(world != NULL);
++
++  PhysicsEnginePtr physics = world->GetPhysicsEngine();
++  ASSERT_TRUE(physics != NULL);
++  EXPECT_EQ(physics->GetType(), physicsEngineStr);
++
++  RokiPhysicsPtr rokiPhysics
++      = boost::static_pointer_cast<RokiPhysics>(physics);
++  ASSERT_TRUE(odePhysics != NULL);
++}
++
++void RokiPhysics_TEST::OnPhysicsMsgResponse(ConstResponsePtr &_msg)
++{
++  if (_msg->type() == physicsPubMsg.GetTypeName())
++    physicsResponseMsg.ParseFromString(_msg->serialized_data());
++}
++
++void RokiPhysics_TEST::PhysicsMsgParam()
++{
++  physicsPubMsg.Clear();
++  physicsResponseMsg.Clear();
++
++  std::string physicsEngineStr = "roki";
++  Load("worlds/empty.world", false, physicsEngineStr);
++  physics::WorldPtr world = physics::get_world("default");
++  ASSERT_TRUE(world != NULL);
++
++  physics::PhysicsEnginePtr engine = world->GetPhysicsEngine();
++  ASSERT_TRUE(engine != NULL);
++
++  transport::NodePtr phyNode;
++  phyNode = transport::NodePtr(new transport::Node());
++  phyNode->Init();
++
++  phyNode->Fini();
++}
++
++TEST_F(RokiPhysics_TEST, PhysicsMsgParam)
++{
++  PhysicsMsgParam();
++}
++
++/////////////////////////////////////////////////
++/// Main
++int main(int argc, char **argv)
++{
++  ::testing::InitGoogleTest(&argc, argv);
++  return RUN_ALL_TESTS();
++}
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiPlaneShape.cc gazebo/gazebo/physics/roki/RokiPlaneShape.cc
+--- gazebo.org/gazebo/physics/roki/RokiPlaneShape.cc	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiPlaneShape.cc	2016-01-09 19:30:19.901144116 +0900
+@@ -0,0 +1,47 @@
++#include "gazebo/common/Console.hh"
++#include "gazebo/physics/roki/RokiPhysics.hh"
++#include "gazebo/physics/roki/RokiCollision.hh"
++#include "gazebo/physics/roki/RokiLink.hh"
++#include "gazebo/physics/roki/RokiPlaneShape.hh"
++#include "gazebo/physics/roki/RokiUtils.hh"
++#include "gazebo/util/system.hh"
++
++
++using namespace gazebo;
++using namespace physics;
++
++RokiPlaneShape::RokiPlaneShape(CollisionPtr _parent) : PlaneShape(_parent)
++{
++  DEBUG_PRINT("RokiPlaneShape::RokiPlaneShape()\n");
++}
++
++RokiPlaneShape::~RokiPlaneShape()
++{
++  DEBUG_PRINT("RokiPlaneShape::~RokiPlaneShape()\n");
++}
++
++void RokiPlaneShape::CreatePlane()
++{
++  RokiCollisionPtr collision = boost::dynamic_pointer_cast<RokiCollision>(this->collisionParent);
++  RokiLinkPtr link = boost::dynamic_pointer_cast<RokiLink>(this->collisionParent->GetLink());
++
++  DEBUG_PRINT("RokiBoxShape::CreatePlane() : link=%s, name=%s\n", link->GetName().c_str(), GetName().c_str());
++
++  zShape3D *shape = zAlloc(zShape3D, 1);
++  zShape3DInit(shape);
++  zVec3D zp = {{ 0, 0, -1 }};
++  zVec3D ax = {{ 1, 0, 0 }};
++  zVec3D ay = {{ 0, 1, 0 }};
++  zVec3D az = {{ 0, 0, 1 }};
++  zShape3DCreateBox(shape, &zp, &ax, &ay, &az, 2000, 2000, 2);
++  zBox3DInit(zShape3DBB(shape));
++
++  zNameSet(shape, const_cast<char*>(link->GetPathName().c_str()));
++
++  collision->shape_ = shape;
++}
++
++void RokiPlaneShape::SetAltitude(const math::Vector3 &_pos)
++{
++  PlaneShape::SetAltitude(_pos);
++}
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiPlaneShape.hh gazebo/gazebo/physics/roki/RokiPlaneShape.hh
+--- gazebo.org/gazebo/physics/roki/RokiPlaneShape.hh	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiPlaneShape.hh	2015-12-28 17:57:38.729592554 +0900
+@@ -0,0 +1,23 @@
++#ifndef _ROKIPLANESHAPE_HH_
++#define _ROKIPLANESHAPE_HH_
++
++#include "gazebo/physics/PlaneShape.hh"
++#include "gazebo/physics/roki/RokiPhysics.hh"
++#include "gazebo/physics/roki/RokiTypes.hh"
++#include "gazebo/physics/roki/RokiLink.hh"
++#include "gazebo/util/system.hh"
++
++namespace gazebo
++{
++  namespace physics
++  {
++    class GZ_PHYSICS_VISIBLE RokiPlaneShape : public PlaneShape
++    {
++      public: explicit RokiPlaneShape(CollisionPtr _parent);
++      public: virtual ~RokiPlaneShape();
++      public: virtual void CreatePlane();
++      public: virtual void SetAltitude(const math::Vector3 &_pos);
++    };
++  }
++}
++#endif
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiSliderJoint.cc gazebo/gazebo/physics/roki/RokiSliderJoint.cc
+--- gazebo.org/gazebo/physics/roki/RokiSliderJoint.cc	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiSliderJoint.cc	2016-01-10 22:04:48.101269619 +0900
+@@ -0,0 +1,151 @@
++#include "gazebo/gazebo_config.h"
++#include "gazebo/common/Console.hh"
++#include "gazebo/physics/Link.hh"
++
++#include "gazebo/physics/roki/RokiTypes.hh"
++#include "gazebo/physics/roki/RokiUtils.hh"
++#include "gazebo/physics/roki/RokiLink.hh"
++#include "gazebo/physics/roki/RokiJoint.hh"
++#include "gazebo/physics/roki/RokiSliderJoint.hh"
++
++#include "rk_motor_pseudo.h"
++
++using namespace gazebo;
++using namespace physics;
++
++RokiSliderJoint::RokiSliderJoint(BasePtr _parent)
++  : SliderJoint<RokiJoint>(_parent), prp_(nullptr)
++{
++  DEBUG_PRINT("RokiSliderJoint::RokiSliderJoint() : joint_name=%s\n", GetName().c_str());
++}
++
++RokiSliderJoint::~RokiSliderJoint()
++{
++  DEBUG_PRINT("RokiSliderJoint::~RokiSliderJoint() : joint_name=%s\n", GetName().c_str());
++}
++
++void RokiSliderJoint::Load(sdf::ElementPtr _sdf)
++{
++  DEBUG_PRINT("RokiSliderJoint::Load() : joint_name=%s\n", GetName().c_str());
++  SliderJoint<RokiJoint>::Load(_sdf);
++}
++
++void RokiSliderJoint::Init()
++{
++  DEBUG_PRINT("RokiSliderJoint::Init() enter : joint_name=%s\n", GetName().c_str());
++
++  SliderJoint<RokiJoint>::Init();
++
++  // create rkJoint
++  rkjoint_ = GetChildRokiLink()->rkjoint_anchor_;
++  rkJointCreate(rkjoint_, RK_JOINT_PRISM);
++
++  // roki/rk_joint_prism.h : 
++  //   typedef struct{
++  //     /* joint displacement, velocity, acceleration and torque */
++  //     double dis, vel, acc, trq;
++  //     double min, max; /* limiter */
++  //     /* joint stiffness, viscosity and coulomb friction */
++  //     double stiff, viscos, coulomb;
++  //     /* friction */
++  //     double tf;
++  //     /* static friction */
++  //     double sf;
++  //
++  //     /* motor */
++  //     rkMotor m;
++  //
++  //     /* for forward dynamics */
++  //     rkJointRef _ref;
++  //   } rkJointPrpPrism;
++
++  // set joint parameters
++  prp_ = (rkJointPrpPrism*)rkjoint_->prp;
++  sdf::ElementPtr elm_limit = this->sdf->GetElement("axis")->GetElement("limit");
++  prp_->min = elm_limit->Get<double>("lower");
++  prp_->max = elm_limit->Get<double>("upper");
++  prp_->tf  = friction_[0];
++  prp_->sf  = friction_[0];
++
++  // create rkMotor
++  rkJointGetMotor(rkjoint_, &rkmotor_);
++  rkMotorInit(rkmotor_);
++  rkMotorCreatePseudo(rkmotor_);
++  
++  // connect rkLinks
++  RokiLinkPtr link_parent = GetParentRokiLink();
++  RokiLinkPtr link_child  = GetChildRokiLink();
++
++  if (link_parent) {
++    rkLink* parent_org_frame   = link_parent->rklink_org_;
++    rkLink* child_anchor_frame = link_child->rklink_anchor_;
++    rkLinkAddChild(parent_org_frame, child_anchor_frame);
++  }
++
++  //
++  // create org2anchor offset pose
++  //
++
++  // position
++  math::Vector3 pos_org_wld = GetChildRokiLink()->GetWorldPose().pos;
++  org2anchor_pose_.pos = anchor_pos_ - pos_org_wld;
++  DEBUG_PRINT("RokiSliderJoint::Init() : name=%s, pos_org_wld=%s, anchor_pos_=%s, org2anchor_pose_.pos=%s\n", GetName().c_str(), conv2str(pos_org_wld), conv2str(anchor_pos_), conv2str(org2anchor_pose_.pos));
++
++  // rotate Z axis -> anchor_axis_ 
++  math::Vector3 axis_z(0, 0, 1);
++  math::Vector3 axis_rot = axis_z.Cross(anchor_axis_);
++  double th = acos(axis_z.Dot(anchor_axis_)/(axis_z.GetLength() * anchor_axis_.GetLength()));
++
++  org2anchor_pose_.rot.SetFromAxis(axis_rot.Normalize(), th);
++
++  DEBUG_PRINT("RokiSliderJoint::Init() : name=%s, joint_axis_=%s, axis_rot=%s, org2anchor_pose_.rot=%s\n", GetName().c_str(), conv2str(anchor_axis_), conv2str(axis_rot), conv2str(org2anchor_pose_.rot));
++
++  DEBUG_PRINT("RokiSliderJoint::Init() leave : joint_name=%s\n", GetName().c_str());
++}
++
++math::Angle RokiSliderJoint::GetAngleImpl(unsigned int _index) const
++{
++  DEBUG_PRINT("RokiSliderJoint::GetAngleImpl() : joint_name=%s, _index=%d\n", GetName().c_str(), _index);
++  return math::Angle();
++}
++
++void RokiSliderJoint::SetVelocity(unsigned int _index, double _vel)
++{
++  DEBUG_PRINT("RokiSliderJoint::SetVelocity() : joint_name=%s, _index=%d, _vt=%f\n", GetName().c_str(), _index, _vel);
++  double v = 0;
++  rkJointSetVel(rkjoint_, &v);
++}
++
++double RokiSliderJoint::GetVelocity(unsigned int _index) const
++{
++  DEBUG_PRINT("RokiSliderJoint::GetVelocity() : joint_name=%s, _index=%d\n", GetName().c_str(), _index);
++  double v = 0;
++  rkJointGetVel(rkjoint_, &v);
++  return v;
++}
++
++void RokiSliderJoint::SetForceImpl(unsigned int _index, double _effort)
++{
++  DEBUG_PRINT("RokiSliderJoint::SetForceImpl() : joint_name=%s, _index=%d, _effort=%f\n", GetName().c_str(), _index, _effort);
++  double e = _effort;
++  rkJointMotorSetInput(rkjoint_, &e);
++}
++
++double RokiSliderJoint::GetForceImpl(unsigned int _index)
++{
++  double f = 0;
++  rkJointGetTrq(rkjoint_, &f);
++  DEBUG_PRINT("RokiSliderJoint::GetForceImpl() : joint_name=%s, _index=%d, force=%f\n", GetName().c_str(), _index, f);
++  return f;
++}
++
++void RokiSliderJoint::SetFriction(const unsigned int _index, const double value)
++{
++  RokiJoint::SetFriction(_index, value);
++
++  if (_index > 0) return;
++  if (rkmotor_ == nullptr) return;
++
++  prp_->tf  = value;
++  prp_->sf  = value;
++}
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiSliderJoint.hh gazebo/gazebo/physics/roki/RokiSliderJoint.hh
+--- gazebo.org/gazebo/physics/roki/RokiSliderJoint.hh	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiSliderJoint.hh	2016-01-04 17:41:04.090250175 +0900
+@@ -0,0 +1,36 @@
++#ifndef _ROKISLIDERJOINT_HH_
++#define _ROKISLIDERJOINT_HH_
++
++#include "gazebo/math/Angle.hh"
++#include "gazebo/math/Vector3.hh"
++
++#include "gazebo/util/system.hh"
++
++#include "gazebo/physics/SliderJoint.hh"
++#include "gazebo/physics/roki/RokiJoint.hh"
++
++namespace gazebo
++{
++  namespace physics
++  {
++    class GZ_PHYSICS_VISIBLE RokiSliderJoint : public SliderJoint<RokiJoint>
++    {
++      public: RokiSliderJoint(BasePtr _parent);
++      public: virtual ~RokiSliderJoint();
++      public: virtual void Load(sdf::ElementPtr _sdf);
++      public: virtual void Init();
++      public: virtual math::Angle GetAngleImpl(unsigned int _index) const;
++      public: virtual void SetVelocity(unsigned int _index, double _vel);
++      public: virtual double GetVelocity(unsigned int _index) const;
++      protected: virtual void SetForceImpl(unsigned int _index, double _effort);
++      protected: virtual double GetForceImpl(unsigned int _index);
++
++      public:
++        virtual void SetFriction(const unsigned int _index, const double value);
++
++      public:
++        rkJointPrpPrism *prp_;
++    };
++  }
++}
++#endif
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiSphereShape.cc gazebo/gazebo/physics/roki/RokiSphereShape.cc
+--- gazebo.org/gazebo/physics/roki/RokiSphereShape.cc	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiSphereShape.cc	2016-01-09 19:29:39.235643685 +0900
+@@ -0,0 +1,46 @@
++#include "gazebo/common/Console.hh"
++#include "gazebo/physics/roki/RokiPhysics.hh"
++#include "gazebo/physics/roki/RokiCollision.hh"
++#include "gazebo/physics/roki/RokiSphereShape.hh"
++#include "gazebo/physics/roki/RokiUtils.hh"
++#include "gazebo/util/system.hh"
++
++using namespace gazebo;
++using namespace physics;
++
++RokiSphereShape::RokiSphereShape(RokiCollisionPtr _parent)
++  : SphereShape(_parent)
++{
++  DEBUG_PRINT("RokiSphereShape::RokiSphereShape()\n");
++}
++
++RokiSphereShape::~RokiSphereShape()
++{
++  DEBUG_PRINT("RokiSphereShape::~RokiSphereShape()\n");
++}
++
++void RokiSphereShape::SetRadius(double _radius)
++{
++  RokiCollisionPtr collision = boost::dynamic_pointer_cast<RokiCollision>(this->collisionParent);
++  RokiLinkPtr link = boost::dynamic_pointer_cast<RokiLink>(this->collisionParent->GetLink());
++
++  DEBUG_PRINT("RokiSphereShape::SetRadius() : link=%s, name=%s, radius=(%f)\n", link->GetName().c_str(), GetName().c_str(), _radius);
++
++  if (_radius <= 0)
++  {
++    gzerr << "Sphere shape does not support negative radius.\n";
++    return;
++  }
++
++  SphereShape::SetRadius(_radius);
++
++  zShape3D* shape = zAlloc(zShape3D, 1);
++  zShape3DInit(shape);
++  zVec3D zp = {{ 0, 0, 0 }};
++  zShape3DCreateSphere(shape, &zp, _radius, 8);
++  zBox3DInit(zShape3DBB(shape));
++
++  zNameSet(shape, const_cast<char*>(link->GetPathName().c_str()));
++
++  collision->shape_ = shape;
++}
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiSphereShape.hh gazebo/gazebo/physics/roki/RokiSphereShape.hh
+--- gazebo.org/gazebo/physics/roki/RokiSphereShape.hh	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiSphereShape.hh	2015-12-28 15:52:30.836597894 +0900
+@@ -0,0 +1,22 @@
++#ifndef _ROKISPHERESHAPE_HH_
++#define _ROKISPHERESHAPE_HH_
++
++#include "gazebo/physics/PhysicsTypes.hh"
++#include "gazebo/physics/SphereShape.hh"
++#include "gazebo/physics/roki/RokiTypes.hh"
++#include "gazebo/physics/roki/RokiLink.hh"
++#include "gazebo/util/system.hh"
++
++namespace gazebo
++{
++  namespace physics
++  {
++    class GZ_PHYSICS_VISIBLE RokiSphereShape : public SphereShape
++    {
++      public: explicit RokiSphereShape(RokiCollisionPtr _parent);
++      public: virtual ~RokiSphereShape();
++      public: virtual void SetRadius(double _radius);
++    };
++  }
++}
++#endif
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiSurfaceParams.cc gazebo/gazebo/physics/roki/RokiSurfaceParams.cc
+--- gazebo.org/gazebo/physics/roki/RokiSurfaceParams.cc	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiSurfaceParams.cc	2016-01-03 18:21:38.672235303 +0900
+@@ -0,0 +1,64 @@
++#include "gazebo/common/Console.hh"
++#include "gazebo/physics/roki/RokiSurfaceParams.hh"
++#include "gazebo/physics/roki/RokiUtils.hh"
++
++using namespace gazebo;
++using namespace physics;
++
++RokiSurfaceParams::RokiSurfaceParams() : SurfaceParams()
++{
++  DEBUG_PRINT("RokiSurfaceParams::RokiSurfaceParams()\n");
++}
++
++RokiSurfaceParams::~RokiSurfaceParams()
++{
++  DEBUG_PRINT("RokiSurfaceParams::~RokiSurfaceParams()\n");
++}
++
++void RokiSurfaceParams::Load(sdf::ElementPtr _sdf)
++{
++  DEBUG_PRINT("RokiSurfaceParams::Load()\n");
++
++  SurfaceParams::Load(_sdf);
++
++  if (!_sdf) {
++    gzerr << "Surface _sdf is NULL" << std::endl;
++  }
++
++  sdf::ElementPtr e_friction = _sdf->GetElement("friction");
++  if (!e_friction) {
++    gzerr << "Surface friction sdf member is NULL" << std::endl;
++    return;
++  }
++
++  sdf::ElementPtr e_friction_ode = e_friction->GetElement("ode");
++  if (!e_friction_ode) {
++    gzerr << "Surface friction ode sdf member is NULL" << std::endl;
++    return;
++  }
++
++  e_friction_ode->Get<double>("mu");
++  e_friction_ode->Get<double>("mu2");
++}
++
++void RokiSurfaceParams::FillMsg(msgs::Surface &_msg)
++{
++  DEBUG_PRINT("RokiSurfaceParams::FillMsg()\n");
++  SurfaceParams::FillMsg(_msg);
++  _msg.mutable_friction()->set_mu(1.0);
++  _msg.mutable_friction()->set_mu2(1.0);
++}
++
++void RokiSurfaceParams::ProcessMsg(const msgs::Surface &_msg)
++{
++  DEBUG_PRINT("RokiSurfaceParams::ProcessMsg()\n");
++  SurfaceParams::ProcessMsg(_msg);
++  if (_msg.has_friction()) { 
++    if (_msg.friction().has_mu()) {
++      DEBUG_PRINT("RokiSurfaceParams::ProcessMsg() : mu=%f\n", _msg.friction().mu());
++    }
++    if (_msg.friction().has_mu2()) {
++      DEBUG_PRINT("RokiSurfaceParams::ProcessMsg() : mu=%f\n", _msg.friction().mu2());
++    }
++  }
++}
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiSurfaceParams.hh gazebo/gazebo/physics/roki/RokiSurfaceParams.hh
+--- gazebo.org/gazebo/physics/roki/RokiSurfaceParams.hh	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiSurfaceParams.hh	2015-12-17 19:50:51.178633116 +0900
+@@ -0,0 +1,25 @@
++#ifndef _ROKISURFACEPARAMS_HH_
++#define _ROKISURFACEPARAMS_HH_
++
++#include <sdf/sdf.hh>
++
++#include "gazebo/math/Vector3.hh"
++#include "gazebo/msgs/msgs.hh"
++#include "gazebo/physics/SurfaceParams.hh"
++#include "gazebo/util/system.hh"
++
++namespace gazebo
++{
++  namespace physics
++  {
++    class GZ_PHYSICS_VISIBLE RokiSurfaceParams : public SurfaceParams
++    {
++      public: RokiSurfaceParams();
++      public: virtual ~RokiSurfaceParams();
++      public: virtual void Load(sdf::ElementPtr _sdf);
++      public: virtual void FillMsg(msgs::Surface &_msg);
++      public: virtual void ProcessMsg(const msgs::Surface &_msg);
++    };
++  }
++}
++#endif
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiTypes.hh gazebo/gazebo/physics/roki/RokiTypes.hh
+--- gazebo.org/gazebo/physics/roki/RokiTypes.hh	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiTypes.hh	2016-01-09 14:57:43.951332497 +0900
+@@ -0,0 +1,22 @@
++#include <boost/shared_ptr.hpp>
++#include "gazebo/util/system.hh"
++
++namespace gazebo
++{
++  namespace physics
++  {
++    class RokiCollision;
++    class RokiJoint;
++    class RokiLink;
++    class RokiModel;
++    class RokiSurfaceParams;
++    class RokiPhysics;
++
++    typedef boost::shared_ptr<RokiCollision>     RokiCollisionPtr;
++    typedef boost::shared_ptr<RokiLink>          RokiLinkPtr;
++    typedef boost::shared_ptr<RokiModel>         RokiModelPtr;
++    typedef boost::shared_ptr<RokiJoint>         RokiJointPtr;
++    typedef boost::shared_ptr<RokiSurfaceParams> RokiSurfaceParamsPtr;
++    typedef boost::shared_ptr<RokiPhysics>       RokiPhysicsPtr;
++  }
++}
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiUtils.cc gazebo/gazebo/physics/roki/RokiUtils.cc
+--- gazebo.org/gazebo/physics/roki/RokiUtils.cc	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiUtils.cc	2016-01-09 16:56:08.998901163 +0900
+@@ -0,0 +1,349 @@
++#include <iostream>
++#include "RokiUtils.hh"
++#include <stdio.h>
++#include <stdarg.h>
++
++#include <sstream>
++
++
++extern "C" {
++  rkFDCell* _rkFDCellPush(rkFD* fd, rkFDCell* lc);
++}
++
++using namespace gazebo;
++using namespace physics;
++
++///////////////////////////////////////////////////////////////
++
++class RokiUtilsStaticObject {
++  public:
++    RokiUtilsStaticObject() {
++      setvbuf(stdout, 0, _IONBF, 0);
++    }
++};
++RokiUtilsStaticObject roki_util_static_object__;
++
++///////////////////////////////////////////////////////////////
++
++bool enable_roki_debug_print__ = false;
++
++void gazebo::physics::set_roki_debug_print_flag_(const bool flag)
++{
++    enable_roki_debug_print__ = flag;
++}
++
++void gazebo::physics::roki_debug_print_(const char *format, ...)
++{
++
++  if (enable_roki_debug_print__ == false) return;
++
++  va_list arg;
++  va_start(arg, format);
++  vprintf(format, arg);
++  va_end(arg);
++}
++
++///////////////////////////////////////////////////////////////
++std::string gazebo::physics::any2str_(const boost::any &a)
++{
++  std::stringstream ss;
++  if(a.type() == typeid(int)) {
++    ss << boost::any_cast<int>(a);
++  }
++  else if(a.type() == typeid(unsigned int)) {
++    ss << boost::any_cast<unsigned int>(a);
++  }
++  else if(a.type() == typeid(short)) {
++    ss << boost::any_cast<short>(a);
++  }
++  else if(a.type() == typeid(unsigned short)) {
++    ss << boost::any_cast<unsigned short>(a);
++  }
++  else if(a.type() == typeid(char)) {
++    ss << boost::any_cast<char>(a);
++  }
++  else if(a.type() == typeid(unsigned char)) {
++    ss << boost::any_cast<unsigned char>(a);
++  }
++  else if(a.type() == typeid(bool)) {
++    ss << boost::any_cast<bool>(a);
++  }
++  else if(a.type() == typeid(float)) {
++    ss << boost::any_cast<float>(a);
++  }
++  else if(a.type() == typeid(double)) {
++    ss << boost::any_cast<double>(a);
++  }
++  else if(a.type() == typeid(long)) {
++    ss << boost::any_cast<long>(a);
++  }
++  else if(a.type() == typeid(long long)) {
++    ss << boost::any_cast<long long>(a);
++  }
++  else if(a.type() == typeid(gazebo::math::Vector3)) {
++    ss << boost::any_cast<gazebo::math::Vector3>(a);
++  }
++  else if(a.type() == typeid(ignition::math::Vector3d)) {
++    ss << boost::any_cast<ignition::math::Vector3d>(a);
++  }
++  else {
++    ss << "cannot convert " << a.type().name() << " to std::string...";
++    std::cerr << ss.str() << std::endl;
++  }
++
++  return ss.str();
++}
++
++std::string gazebo::physics::conv2str_(const math::Angle &a)
++{
++  std::stringstream ss;
++  ss.precision(5);
++  ss << a;
++  return ss.str();
++}
++
++std::string gazebo::physics::conv2str_(const math::Vector3 &v)
++{
++  std::stringstream ss;
++  ss.precision(5);
++  ss << v;
++  return ss.str();
++}
++
++std::string gazebo::physics::conv2str_(const math::Quaternion &q)
++{
++  std::stringstream ss;
++  ss.precision(5);
++  ss << q;
++  return ss.str();
++}
++
++std::string gazebo::physics::conv2str_(const math::Matrix3 &m)
++{
++  std::stringstream ss;
++  ss.precision(5);
++  ss << m;
++  return ss.str();
++}
++
++std::string gazebo::physics::conv2str_(const math::Matrix4 &m)
++{
++  std::stringstream ss;
++  ss.precision(5);
++  ss << m;
++  return ss.str();
++}
++
++std::string gazebo::physics::conv2str_(const math::Pose &p)
++{
++  std::stringstream ss;
++  ss.precision(5);
++  ss << p;
++  return ss.str();
++}
++
++std::string gazebo::physics::conv2str_(const zFrame3D* f)
++{
++  std::stringstream ss;
++  ss.precision(5);
++
++  ss << "zFrame3D[pos=(";
++  ss << zVec3DElem(zFrame3DPos(f), 0) << " ";
++  ss << zVec3DElem(zFrame3DPos(f), 1) << " ";
++  ss << zVec3DElem(zFrame3DPos(f), 2) << " ";
++  ss << "),att=(";
++  ss << zMat3DElem(zFrame3DAtt(f), 0, 0) << " ";
++  ss << zMat3DElem(zFrame3DAtt(f), 1, 0) << " ";
++  ss << zMat3DElem(zFrame3DAtt(f), 2, 0) << " ";
++  ss << zMat3DElem(zFrame3DAtt(f), 0, 1) << " ";
++  ss << zMat3DElem(zFrame3DAtt(f), 1, 1) << " ";
++  ss << zMat3DElem(zFrame3DAtt(f), 2, 1) << " ";
++  ss << zMat3DElem(zFrame3DAtt(f), 0, 2) << " ";
++  ss << zMat3DElem(zFrame3DAtt(f), 1, 2) << " ";
++  ss << zMat3DElem(zFrame3DAtt(f), 2, 2) << " ";
++  ss << ")]";
++
++  return ss.str();
++}
++
++math::Pose gazebo::physics::conv2pose(const zVec dis, const int chain_offset_idx)
++{
++  math::Pose pose;
++
++  math::Vector3 pos;
++  math::Quaternion q;
++
++  pos.x   = zVecElem(dis, chain_offset_idx + 0);
++  pos.y   = zVecElem(dis, chain_offset_idx + 1);
++  pos.z   = zVecElem(dis, chain_offset_idx + 2);
++
++  math::Vector3 aa(
++    zVecElem(dis, chain_offset_idx + 3),
++    zVecElem(dis, chain_offset_idx + 4),
++    zVecElem(dis, chain_offset_idx + 5));
++
++  double angle = aa.GetLength(); // norm
++  printf("angle=%f\n", angle);
++
++  if (angle > 0.00001) {
++    q.SetFromAxis(aa.x/angle, aa.y/angle, aa.z/angle, angle);
++  }
++
++  pose.pos = pos;
++  pose.rot = q;
++
++  return pose;
++}
++
++math::Pose gazebo::physics::conv2pose(const zFrame3D *f)
++{
++  // // zeo/zeo_frame.h
++  // typedef struct{
++  //   zVec3D pos;
++  //   zMat3D att;
++  // } zFrame3D;
++  // 
++  // #define zFrame3DPos(f) ( &(f)->pos )
++  // #define zFrame3DAtt(f) ( &(f)->att )
++  //
++  // // zeo/zeo_vec3d.h
++  // typedef struct{
++  //     double e[3];
++  // } zVec3D;
++  //
++  // /* for backward compatibility */
++  // #define zVec3DElem(v,i)      ( (v)->e[i] )
++  // #define zVec3DSetElem(v,i,x) ( zVec3DElem(v,i) = (x) )
++  //
++  // // zeo/zeo_mat3d.h
++  // typedef union{
++  //   double e[3][3]; /*!< 3x3 matrix */
++  //   zVec3D v[3];    /*!< 3 column vectors */
++  //   double c[9];    /*!< 9 components */
++  // } zMat3D;
++  //
++  // /* for backward compatibility */
++  // #define zMat3DElem(m,r,c)      (m)->e[(c)][(r)]
++  // #define zMat3DSetElem(m,r,c,x) ( zMat3DElem(m,r,c) = (x) )
++  // #define zMat3DElem9(m,i)       ( (m)->c[i] )
++  // #define zMat3DSetElem9(m,i,c)  ( zMat3DElem9(m,i) = (c) )
++  // #define zMat3DVec(m,i)         ( &(m)->v[(i)] )
++  // #define zMat3DSetVec(m,i,v)    zVec3DCopy(v,zMat3DVec(m,i)
++
++  math::Pose pose;
++  math::Vector3 pos;
++  math::Matrix4 m;
++
++  pos.x = zVec3DElem(zFrame3DPos(f), 0);
++  pos.y = zVec3DElem(zFrame3DPos(f), 1);
++  pos.z = zVec3DElem(zFrame3DPos(f), 2);
++
++  m.Set(
++    zMat3DElem(zFrame3DAtt(f), 0, 0),
++    zMat3DElem(zFrame3DAtt(f), 1, 0),
++    zMat3DElem(zFrame3DAtt(f), 2, 0),
++    0,
++
++    zMat3DElem(zFrame3DAtt(f), 0, 1),
++    zMat3DElem(zFrame3DAtt(f), 1, 1),
++    zMat3DElem(zFrame3DAtt(f), 2, 1),
++    0,
++
++    zMat3DElem(zFrame3DAtt(f), 0, 2),
++    zMat3DElem(zFrame3DAtt(f), 1, 2),
++    zMat3DElem(zFrame3DAtt(f), 2, 2),
++    0,
++
++    0,
++    0,
++    0,
++    1
++  );
++
++  pose.pos = pos;
++  pose.rot = m.Inverse().GetRotation();
++
++  return pose;
++}
++
++void gazebo::physics::pose2zFrame3D(const math::Pose &pose, zFrame3D *f)
++{
++    zVec3DCreate(zFrame3DPos(f), pose.pos.x, pose.pos.y, pose.pos.z);
++
++    math::Matrix3 m = pose.rot.GetAsMatrix3();
++
++    zMat3DCreate(
++        zFrame3DAtt(f),
++        m[0][0], m[0][1], m[0][2],
++        m[1][0], m[1][1], m[1][2],
++        m[2][0], m[2][1], m[2][2]);
++}
++
++void gazebo::physics::pose2rklinkdis(const math::Pose &pose, rkFDCell *lc, rkChain *chain, const int &rklink_idx)
++{
++    zVec dis = zVecAlloc(rkChainJointSize(chain));
++    rkChainGetJointDisAll(chain, dis);
++
++    int chain_offset_idx = rkChainLinkOffset(chain, rklink_idx);
++
++    math::Vector3 angle = pose.rot.GetAsEuler();
++
++    zVecElem(dis, chain_offset_idx + 0) = pose.pos.x;
++    zVecElem(dis, chain_offset_idx + 1) = pose.pos.y;
++    zVecElem(dis, chain_offset_idx + 2) = pose.pos.z;
++    zVecElem(dis, chain_offset_idx + 3) = angle.x;
++    zVecElem(dis, chain_offset_idx + 4) = angle.y;
++    zVecElem(dis, chain_offset_idx + 5) = angle.z;
++
++    // apply chain displacementj
++    rkFDChainSetDis(lc, dis);
++
++    zVecFree(dis);
++}
++
++///////////////////////////////////////////////////////////////
++DummyRokiObject::DummyRokiObject(rkFD *fd_)
++{
++  // cell
++  lc = zAlloc(rkFDCell, 1);
++
++  // chain
++  chain = &(lc->data.chain);
++  rkChainInit(chain);
++  zArrayAlloc(&(chain->link), rkLink, 1);
++
++  // link
++  rklink = rkChainLink(chain, 0);
++  rkLinkInit(rklink);
++
++  zVec3DCreate(rkLinkOrgPos(rklink), 0, 0, 0);
++  zMat3DCreate(
++      rkLinkOrgAtt(rklink),
++      1,  0,  0,
++      0,  1,  0,
++      0,  0,  1);
++
++  // mass
++  rkLinkSetMass(rklink, 1.0);
++  zVec3DCreate(rkLinkCOM(rklink), 0, 0, 0);
++  zMat3DCreate(
++      rkLinkInertia(rklink),
++      0.01,    0,    0,
++      0,    0.01,    0,
++      0,       0, 0.01);
++
++  // joint
++  joint = rkLinkJoint(rklink);
++  rkJointCreate(joint, RK_JOINT_FLOAT);
++
++  rkChainSetMass(chain, 1.0);
++  rkChainSetOffset(chain);
++  rkChainUpdateFK(chain);
++  rkChainUpdateID(chain);
++
++  _rkFDCellPush(fd_, lc);
++}
++
++DummyRokiObject::~DummyRokiObject()
++{
++}
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/roki/RokiUtils.hh gazebo/gazebo/physics/roki/RokiUtils.hh
+--- gazebo.org/gazebo/physics/roki/RokiUtils.hh	1970-01-01 09:00:00.000000000 +0900
++++ gazebo/gazebo/physics/roki/RokiUtils.hh	2016-01-09 16:53:21.606130906 +0900
+@@ -0,0 +1,54 @@
++#ifndef _ROKIUTILS_HH_
++#define _ROKIUTILS_HH_
++
++#include "gazebo/physics/PhysicsEngine.hh"
++#include "roki/rk_fd.h"
++#include "RokiTypes.hh"
++
++#include <boost/any.hpp>
++#include <string>
++
++namespace gazebo
++{
++  namespace physics
++  {
++    // for debug
++    #define ENABLE_DEBUG_PRINT(...)  gazebo::physics::set_roki_debug_print_flag_(true)
++    #define DEBUG_PRINT(...)  gazebo::physics::roki_debug_print_(__VA_ARGS__)
++    void set_roki_debug_print_flag_(const bool flag);
++    void roki_debug_print_(const char *format, ...);
++
++    #define any2str(a) (any2str_(a).c_str())
++    std::string any2str_(const boost::any &a); 
++
++    #define conv2str(a) (conv2str_(a).c_str())
++    std::string conv2str_(const math::Angle &a);
++    std::string conv2str_(const math::Vector3 &v);
++    std::string conv2str_(const math::Quaternion &q);
++    std::string conv2str_(const math::Matrix3 &m);
++    std::string conv2str_(const math::Matrix4 &m);
++    std::string conv2str_(const math::Pose &p);
++    std::string conv2str_(const zFrame3D *f);
++
++    math::Pose conv2pose(const zVec dis, const int chain_offset_idx);
++    math::Pose conv2pose(const zFrame3D *f);
++
++    void pose2zFrame3D(const math::Pose &pose, zFrame3D *p);
++    void pose2rklinkdis(const math::Pose &pose, rkFDCell *lc, rkChain *chain, const int &rklink_idx);
++
++    class DummyRokiObject {
++      public:
++        DummyRokiObject(rkFD *fd_);
++        virtual ~DummyRokiObject();
++
++        rkFDCell *lc;
++        rkChain  *chain;
++        rkLink   *rklink;
++        rkJoint  *joint;
++    };
++
++    typedef boost::shared_ptr<DummyRokiObject>       DummyRokiObjectPtr;
++  }
++}
++
++#endif
+diff -x build -x .git -uprN gazebo.org/gazebo/physics/World.hh gazebo/gazebo/physics/World.hh
+--- gazebo.org/gazebo/physics/World.hh	2015-12-15 14:41:42.924921317 +0900
++++ gazebo/gazebo/physics/World.hh	2015-12-21 21:28:33.097482829 +0900
+@@ -483,6 +483,9 @@ namespace gazebo
+ 
+       /// Friend SimbodyPhysics so that it has access to dataPtr->dirtyPoses
+       private: friend class SimbodyPhysics;
++
++      /// Friend Roki so that it has access to dataPtr->dirtyPoses
++      private: friend class RokiLink;
+     };
+     /// \}
+   }
+diff -x build -x .git -uprN gazebo.org/gazebo/Server.cc gazebo/gazebo/Server.cc
+--- gazebo.org/gazebo/Server.cc	2015-12-15 14:41:43.020921316 +0900
++++ gazebo/gazebo/Server.cc	2015-12-16 20:47:37.517073706 +0900
+@@ -104,7 +104,7 @@ bool Server::ParseArgs(int _argc, char *
+     ("help,h", "Produce this help message.")
+     ("pause,u", "Start the server in a paused state.")
+     ("physics,e", po::value<std::string>(),
+-     "Specify a physics engine (ode|bullet|dart|simbody).")
++     "Specify a physics engine (ode|bullet|dart|simbody|roki).")
+     ("play,p", po::value<std::string>(), "Play a log file.")
+     ("record,r", "Record state data.")
+     ("record_encoding", po::value<std::string>()->default_value("zlib"),

@@ -1,0 +1,30 @@
+
+      <plugin name='osc_pid_controller' filename='libosc_pid_controller_plugin.so'>
+        <osc_port>7000</osc_port>
+        <joint name='hip_r_pitch'  p='100' i='50' d='100' initial_value='0.78539816339'/>
+        <joint name='knee_r_pitch' p='100' i='50' d='100' initial_value='-1.57079632679'/>
+        <joint name='heel_r_pitch' p='100' i='50' d='100' initial_value='0.78539816339'/>
+        <joint name='hip_l_pitch'  p='100' i='50' d='100' initial_value='0.78539816339'/>
+        <joint name='knee_l_pitch' p='100' i='50' d='100' initial_value='-1.57079632679'/>
+        <joint name='heel_l_pitch' p='100' i='50' d='100' initial_value='0.78539816339'/>
+        <capture_file>/home/test/capture.csv</capture_file>
+      </plugin>
+
+      <plugin name='osc_pid_controller' filename='libosc_pid_controller_plugin.so'>
+        <osc_port>7000</osc_port>
+        <joint name='hip_r_pitch'  p='100' i='100' d='70' initial_value='0'/>
+        <joint name='knee_r_pitch' p='100' i='100' d='70' initial_value='0'/>
+        <joint name='heel_r_pitch' p='100' i='100' d='70' initial_value='0'/>
+        <joint name='hip_l_pitch'  p='100' i='100' d='70' initial_value='0'/>
+        <joint name='knee_l_pitch' p='100' i='100' d='70' initial_value='0'/>
+        <joint name='heel_l_pitch' p='100' i='100' d='70' initial_value='0'/>
+        <joint name='shoulder_r_pitch' p='20' i='10' d='10' initial_value='0'/>
+        <joint name='shoulder_r_roll'  p='20' i='10' d='10' initial_value='0'/>
+        <joint name='shoulder_r_yaw'   p='20' i='10' d='10' initial_value='0'/>
+        <joint name='elbow_r_pitch'    p='20' i='10' d='10' initial_value='0'/>
+        <joint name='shoulder_l_pitch' p='20' i='10' d='10' initial_value='0'/>
+        <joint name='shoulder_l_roll'  p='20' i='10' d='10' initial_value='0'/>
+        <joint name='shoulder_l_yaw'   p='20' i='10' d='10' initial_value='0'/>
+        <joint name='elbow_l_pitch'    p='20' i='10' d='10' initial_value='0'/>
+        <capture_file>/home/test/capture.csv</capture_file>
+      </plugin>
