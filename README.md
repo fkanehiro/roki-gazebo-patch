@@ -1,6 +1,6 @@
 # roki-gazebo-patch
 
-Roki (http://www.mi.ams.eng.osaka-u.ac.jp/software/roki.html) をシミュレータGazebo (www.gazebosim.org) で使用できるようにするためのパッチです。
+Robot Kinetics Library Roki (http://www.mi.ams.eng.osaka-u.ac.jp/software/roki.html) をシミュレータGazebo (www.gazebosim.org) で使用できるようにするためのパッチです。
 
 インストール方法
 ================
@@ -10,7 +10,7 @@ Rokiのインストール
 ```
 $ sudo add-apt-repository ppa:hrg/daily
 $ sudo apt-get update
-$ sudo apt-get install roki
+$ sudo apt-get install roki-dev
 ```
 
 Gazeboのビルド環境整備
@@ -59,10 +59,40 @@ $ patch -u -p1 <path to this project>/src/patch-gazebo-roki-20160111.diff
 $ cd ~/gazebo_source/gazebo/
 $ mkdir build
 $ cd build
-$ cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_TESTS_COMPILATION:BOOL=False ../
+$ cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_TESTS_COMPILATION:BOOL=False -DCMAKE_INSTALL_PREFIX=/usr/local ../
 $ make -j 4
 $ make -j 4 install
 ```
+gzserverのヘルプを表示して、対応しているシミュレータ動力学計算エンジンの一覧に Rokiが追加されていることを確認してください。
+```
+$ gzserver -h
+gzserver -- Run the Gazebo server.
+
+`gzserver` [options] <world_file>
+
+Gazebo server runs simulation and handles commandline options, 
+starts a Master, runs World update and sensor generation loops.
+
+Options:
+  -v [ --version ]              Output version information.
+  --verbose                     Increase the messages written to the terminal.
+  -h [ --help ]                 Produce this help message.
+  -u [ --pause ]                Start the server in a paused state.
+  -e [ --physics ] arg          Specify a physics engine 
+                                (ode|bullet|dart|simbody|roki).
+  -p [ --play ] arg             Play a log file.
+  -r [ --record ]               Record state data.
+  --record_encoding arg (=zlib) Compression encoding format for log data 
+                                (zlib|bz2|txt).
+  --record_path arg             Absolute path in which to store state data
+  --seed arg                    Start with a given random number seed.
+  --iters arg                   Number of iterations to simulate.
+  --minimal_comms               Reduce the TCP/IP traffic output by gzserver
+  -s [ --server-plugin ] arg    Load a plugin.
+  -o [ --profile ] arg          Physics preset profile name from the options in
+                                the world file.
+```
+
 
 physics.sdfの修正
 -----------------
@@ -100,63 +130,9 @@ SDFファイルにrokiの設定を記述できるように、/usr/share/sdformat
  </element> <!-- Physics -->
 ```
 
-環境設定
-========
-
-~/.bashrcの設定
----------------
-~/.bashrcに次の設定を追加して、Gazeboの実行に必要な環境変数を設定します。
-```
-  export LD_LIBRARY_PATH=$HOME/local/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}
-  export PATH=${HOME}/local/bin:${PATH}
-  export PKG_CONFIG_PATH=$HOME/local/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH
-
-  export GAZEBO_RESOURCE_PATH=${GAZEBO_RESOURCE_PATH}:${HOME}/local/share/gazebo-6.0
-  export GAZEBO_MODEL_PATH=${GAZEBO_MODEL_PATH}:${HOME}/gazebo_models
-```
-~/.bashrcの設定後、sourceコマンドを使って~/.bashrcを読み込み設定を反映するか、またはbashを再起動して、設定した環境変数を反映してください。
-
-
-動作確認
---------
-gzserverのヘルプを表示して、対応しているシミュレータ動力学計算エンジンの一覧に Rokiが追加されていることを確認してください。
-```
-$ gzserver -h
-gzserver -- Run the Gazebo server.
-
-`gzserver` [options] <world_file>
-
-Gazebo server runs simulation and handles commandline options, 
-starts a Master, runs World update and sensor generation loops.
-
-Options:
-  -v [ --version ]              Output version information.
-  --verbose                     Increase the messages written to the terminal.
-  -h [ --help ]                 Produce this help message.
-  -u [ --pause ]                Start the server in a paused state.
-  -e [ --physics ] arg          Specify a physics engine 
-                                (ode|bullet|dart|simbody|roki).
-  -p [ --play ] arg             Play a log file.
-  -r [ --record ]               Record state data.
-  --record_encoding arg (=zlib) Compression encoding format for log data 
-                                (zlib|bz2|txt).
-  --record_path arg             Absolute path in which to store state data
-  --seed arg                    Start with a given random number seed.
-  --iters arg                   Number of iterations to simulate.
-  --minimal_comms               Reduce the TCP/IP traffic output by gzserver
-  -s [ --server-plugin ] arg    Load a plugin.
-  -o [ --profile ] arg          Physics preset profile name from the options in
-                                the world file.
-```
-
 シミュレーションの実行
 ======================
 
-モデルファイルのダウンロード
-----------------------------
-次のコマンドを実行して、Gazeboで利用するモデルファイルをあらかじめダウンロードしておきます。
 ```
-$ cd ~
-$ hg clone https://bitbucket.org/osrf/gazebo_models　
+gazebo --pause -e roki <path to this project>/worlds/test10_box10.world
 ```
-
