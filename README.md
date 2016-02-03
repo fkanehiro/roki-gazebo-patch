@@ -96,43 +96,15 @@ Options:
 
 physics.sdfの修正
 -----------------
-SDFファイルにrokiの設定を記述できるように、/usr/share/sdformat/1.5/physics.sdf を次のように修正します。
+SDFファイルにrokiの設定を記述できるように、/usr/share/sdformat/1.5/physics.sdf にパッチをあてます。
 ```
-@@ -210,4 +210,29 @@
-       </element>
-     </element> <!-- End Constraints -->
-   </element> <!-- ODE -->
-+
-+  <element name="roki" required="0">
-+    <description>Roki specific physics properties</description>
-+    <element name="solver_type" type="string" default="Volume" required="0">
-+      <description>rkFDSetSolver() parameter. choose Vert or Volume</description>
-+    </element>
-+    <element name="contact_info" required="0">
-+      <description></description>
-+      <element name="compensation" type="double" default="1000" required="0">
-+        <description>rkContactInfoRigidCreate() parameter</description>
-+      </element>
-+      <element name="relaxation" type="double" default="0.01" required="0">
-+        <description>rkContactInfoRigidCreate() parameter</description>
-+      </element>
-+      <element name="static_friction" type="double" default="5.0" required="0">
-+        <description>rkContactInfoRigidCreate() parameter</description>
-+      </element>
-+      <element name="friction" type="double" default="3.0" required="0">
-+        <description>rkContactInfoRigidCreate() parameter</description>
-+      </element>
-+    </element>
-+    <element name="debug_print" type="bool" default="false" required="0">
-+      <description>enable debug print</description>
-+    </element>
-+  </element>
- </element> <!-- Physics -->
+$ cd /usr/share/sdformat/1.5
+$ sudo patch < <path to this project>/src/physics.sdf.patch
 ```
 
 シミュレーションの実行
 ======================
-
+次のように-eオプションでrokiを指定してGazeboを起動しシミュレーションを開始します。
 ```
 gazebo --pause -e roki <path to this project>/worlds/test10_box10.world
 ```
